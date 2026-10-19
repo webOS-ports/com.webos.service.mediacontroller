@@ -4,7 +4,7 @@
     "com.webos.service.mediacontroller/getMediaPlayStatus",
     "com.webos.service.mediacontroller/getMediaSessionInfo",
     "com.webos.service.mediacontroller/getMediaSessionId",
-    "com.webos.service.mediacontroller/getActiveMediaSessions"
+    "com.webos.service.mediacontroller/getActiveMediaSessions"@MCS_API_COVER_ART_PATH@
   ],
   "mediacontroller.query": [
     "com.webos.service.mediacontroller/registerMediaSession",
@@ -14,10 +14,12 @@
     "com.webos.service.mediacontroller/setMediaMetaData",
     "com.webos.service.mediacontroller/setMediaPlayStatus",
     "com.webos.service.mediacontroller/setMediaMuteStatus",
-    "com.webos.service.mediacontroller/setMediaPlayPosition"
+    "com.webos.service.mediacontroller/setMediaPlayPosition",
+    "com.webos.service.mediacontroller/setMediaCoverArt",
+    "com.webos.service.mediacontroller/setSupportedActions"
   ],
   "mediacontroller.management": [
     "com.webos.service.mediacontroller/receiveMediaPlaybackInfo",
-    "com.webos.service.mediacontroller/injectMediaKeyEvent"
+    "com.webos.service.mediacontroller/injectMediaKeyEvent"@MCS_API_TEST_KEY_EVENT@
   ]
 }

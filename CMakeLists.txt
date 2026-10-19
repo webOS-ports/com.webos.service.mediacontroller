@@ -141,6 +141,18 @@ install(TARGETS MCSKeyEventTestApp DESTINATION ${WEBOS_INSTALL_TESTSDIR}/${PROJE
 endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION ${WEBOS_INSTALL_SBINDIR})
+
+# The API files list what the build registers, and nothing else.
+if(MCS_COVER_ART)
+set(MCS_API_COVER_ART_PATH ",\n    \"com.webos.service.mediacontroller/getMediaCoverArtPath\"")
+else()
+set(MCS_API_COVER_ART_PATH "")
+endif()
+if(MCS_TEST_METHODS)
+set(MCS_API_TEST_KEY_EVENT ",\n    \"com.webos.service.mediacontroller/testKeyEvent\"")
+else()
+set(MCS_API_TEST_KEY_EVENT "")
+endif()
 if(${USE_NEW_ACG})
     message("USE_NEW_ACG is ${USE_NEW_ACG}")
     webos_build_system_bus_files(${CMAKE_SOURCE_DIR}/files/sysbus_new)

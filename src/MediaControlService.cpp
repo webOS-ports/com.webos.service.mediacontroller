@@ -136,6 +136,8 @@ void MediaControlService::stop() {
   for (auto& client : sessionClients_)
     LSMessageUnref(client.second);
   sessionClients_.clear();
+  // and the sessions with them: none of their clients is held any more
+  mediaSessionMgr_.clear();
 
   /* LSUnregister() ends every call and subscription on the handle; what is
    * recorded of them goes with it. */

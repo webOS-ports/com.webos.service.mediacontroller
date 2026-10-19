@@ -46,6 +46,8 @@ public:
   int activateMediaSession (const std::string& mediaId);
   int deactivateMediaSession (const std::string& mediaId);
   int removeMediaSession (const std::string& mediaId);
+  //! Every session gone, active or not.
+  void clear();
   int getMediaMetaData(const std::string& mediaId,
                        mediaMetaData& objMetaData);
   int getMediaCoverArt(const std::string& mediaId,

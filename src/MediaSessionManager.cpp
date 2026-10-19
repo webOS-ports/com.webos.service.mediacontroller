@@ -71,6 +71,12 @@ int MediaSessionManager::removeMediaSession(const std::string& mediaId) {
   return MCS_ERROR_NO_ERROR;
 }
 
+void MediaSessionManager::clear() {
+  for (const auto& session : mapMediaSessionInfo_)
+    objRequestRcvr_.removeClient(session.first);
+  mapMediaSessionInfo_.clear();
+}
+
 int MediaSessionManager::getMediaMetaData(const std::string& mediaId,
                                           mediaMetaData& objMetaData) {
   const mediaSession *session = find(mediaId, __FUNCTION__);

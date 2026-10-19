@@ -24,7 +24,7 @@
 #include <pbnjson.hpp>
 #include <luna-service2/lunaservice.h>
 
-#define SYSTEM_PARAMETERS "\"$activity\":{\"type\":\"object\",\"optional\":true}"
+#define SYSTEM_PARAMETERS "\"$activity\":{\"type\":\"object\"}"
 
 // Build a schema as a const char * string without any execution overhead
 #define SCHEMA_ANY "{}"
@@ -46,7 +46,9 @@
 
 // Macros to use in place of the parameters in the SCHEMA_xxx macros above
 #define REQUIRED(name, type) "\"" #name "\":{\"type\":\"" #type "\"}"
-#define OPTIONAL(name, type) "\"" #name "\":{\"type\":\"" #type "\",\"optional\":true}"
+// Optional by not being in the schema's required list: "optional" is not
+// a JSON Schema keyword, and pbnjson said so on every message.
+#define OPTIONAL(name, type) "\"" #name "\":{\"type\":\"" #type "\"}"
 
 /*
  * LSError that frees itself: luna-service2 allocates the message of an error

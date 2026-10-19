@@ -30,12 +30,6 @@ class MediaControlPrivate
 {
 public:
   MediaControlPrivate();
-  bool playStatus_;
-  bool muteStatus_;
-  bool playPosition_;
-  bool mediaMetaData_;
-  bool coverArt_;
-  bool enableMediaAction_;
 
   /* Bluetooth devices with AVRCP connected, keyed by
    * "<adapter address>/<device address>". */

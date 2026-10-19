@@ -25,33 +25,22 @@ LSMessageJsonParser::LSMessageJsonParser(LSMessage * message,
                                          mSchema_(schema) {
 }
 
-bool LSMessageJsonParser::parse(const char * callerFunction,
-                                LSHandle * lssender) {
+bool LSMessageJsonParser::parse(const char * callerFunction) {
   const char * payload = getPayload();
-  if (!mParser_.parse(payload, mSchema_)) {
-    std::string errorText = "Could not validate json message against schema";
-    bool notJson = true;
-    if (strcmp(mSchemaText_, SCHEMA_ANY) != 0) {
-      pbnjson::JSchemaFragment genericSchema(SCHEMA_ANY);
-      notJson = !mParser_.parse(payload, genericSchema);
-    }
-    if (notJson) {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s : The message '%s' sent is not a valid  \
-                json message.", callerFunction, payload);
-      errorText = "Not a valid json message";
-    }
-    else {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s : Could not validate json message '%s'\
-                 against schema '%s'.",
-                 callerFunction, payload, mSchemaText_);
-     }
-     std::string reply = createJsonReplyString(false, 1, errorText);
-     CLSError lserror;
-     if (!LSMessageReply(lssender, mMessage_, reply.c_str(), &lserror))
-        PMLOG_ERROR(CONST_MODULE_MCS, "%s LSMessageReply failed",callerFunction);
-     return false;
-   }
- return true;
+  if (!payload) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s : message without a payload", callerFunction);
+    return false;
+  }
+  if (mParser_.parse(payload, mSchema_))
+    return true;
+
+  pbnjson::JSchemaFragment genericSchema(SCHEMA_ANY);
+  if (strcmp(mSchemaText_, SCHEMA_ANY) == 0 || !mParser_.parse(payload, genericSchema))
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s : '%s' is not a valid JSON message", callerFunction, payload);
+  else
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s : '%s' does not match the schema '%s'", callerFunction,
+                payload, mSchemaText_);
+  return false;
 }
 
 std::string createJsonReplyString(bool returnValue,

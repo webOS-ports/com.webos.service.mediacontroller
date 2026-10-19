@@ -17,9 +17,7 @@
 /*-----------------------------------------------------------------------------*/
 #include "MediaControlPrivate.h"
 
-MediaControlPrivate::MediaControlPrivate() :
-  playStatus_(false), muteStatus_(false), playPosition_(false),
-  mediaMetaData_(false), coverArt_(false), enableMediaAction_(false), mapDeviceInfo_() {
+MediaControlPrivate::MediaControlPrivate() : mapDeviceInfo_() {
 }
 
 static std::string deviceKey(const std::string& address, const std::string& adapterAddress) {

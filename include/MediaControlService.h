@@ -85,6 +85,8 @@ private:
   void cancelCall(LSMessageToken& token);
   void notifyBTPlayStatus(const std::string& mediaId, const std::string& playStatus);
   bool sendKeyEvent(const std::string& mediaId, const std::string& keyEvent);
+  void broadcastPlaybackInfo(const std::string& mediaId, const std::string& eventType,
+                             pbnjson::JValue payload);
   void releaseSessionClient(const std::string& mediaId);
 
   LSHandle *lsHandle_ = nullptr;

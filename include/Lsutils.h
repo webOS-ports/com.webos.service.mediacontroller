@@ -81,17 +81,17 @@ public:
   // Default no using any specific schema. Will simply validate that the message is a valid json message.
   LSMessageJsonParser(LSMessage * message, const char * schema);
 
-  //Parse the message using the schema passed in constructor
-  //If 'sender' is specified, automatically reply in case of bad syntax using standard format
-  //Option to log the text of the message by default
-  bool parse(const char *func, LSHandle *sender = 0);
+  //Parse the message using the schema passed in constructor; false, and
+  //the reason logged, if it is not JSON or does not match. Replying is
+  //the caller's.
+  bool parse(const char *func);
   pbnjson::JValue get() { return mParser_.getDom(); }
   const char * getPayload() { return LSMessageGetPayload(mMessage_); }
 
   // convenience functions to get a parameter directly.
   bool get(const char * name, std::string & str){ return get()[name].asString(str) == CONV_OK; }
   bool get(const char * name, bool & boolean) { return get()[name].asBool(boolean) == CONV_OK; }
-  template <class T> bool get(const char *name, T &number) { return get().asNumber<T>(number) == CONV_OK; }
+  template <class T> bool get(const char *name, T &number) { return get()[name].asNumber<T>(number) == CONV_OK; }
 
 private:
   LSMessage *mMessage_;

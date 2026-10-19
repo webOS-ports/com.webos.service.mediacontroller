@@ -99,6 +99,13 @@ if(MCS_MANUAL_TEST_CLIENTS)
 add_subdirectory(${CMAKE_SOURCE_DIR}/test/)
 endif()
 
+option(BUILD_TESTING "Build the unit tests in tests/" OFF)
+if(BUILD_TESTING)
+# libstdc++'s own checks (front() of an empty list and the like) abort
+# in the tests instead of passing unseen.
+add_definitions(-D_GLIBCXX_ASSERTIONS)
+endif()
+
 # Everything but main(), so the tests can link the service's own objects.
 set(SRC_LIST
     ${CMAKE_SOURCE_DIR}/src/MediaControlService.cpp
@@ -158,4 +165,9 @@ if(${USE_NEW_ACG})
     webos_build_system_bus_files(${CMAKE_SOURCE_DIR}/files/sysbus_new)
 else()
     webos_build_system_bus_files(${CMAKE_SOURCE_DIR}/files/sysbus)
+endif()
+
+if(BUILD_TESTING)
+enable_testing()
+add_subdirectory(tests)
 endif()

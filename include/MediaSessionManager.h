@@ -77,7 +77,10 @@ public:
   std::string getCurrentActiveSession();
   bool validatePlayStatus(const std::string& playStatus);
   int getDisplayIdForMedia(const std::string& mediaId);
-  std::string getMediaIdFromDisplayId(const int& displayId);
+  std::string getMediaIdFromDisplayId(int displayId);
+  //! The display an app is on: with FEATURE_DUAL_DISPLAY the last
+  //! character of its appId, when that is a digit; else 0.
+  static int displayIdFromAppId(const std::string& appId);
   int coverArtDownload(const std::string& mediaId, const std::vector<std::string> uri);
   bool download(const std::string& uri);
   void setLSHandle(LSHandle *lshandle) { lshandle_ = lshandle;};

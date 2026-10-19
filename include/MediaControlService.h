@@ -70,6 +70,7 @@ public:
 #if USE_TEST_METHOD
   bool testKeyEvent(LSMessage &);
 #endif
+  static bool onSubscriptionCancel(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTServerStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTAdapterQueryCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTDeviceGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
@@ -83,10 +84,16 @@ private:
   void dropBTDevice(const std::string& address, const std::string& adapterAddress);
   void cancelCall(LSMessageToken& token);
   void notifyBTPlayStatus(const std::string& mediaId, const std::string& playStatus);
+  bool sendKeyEvent(const std::string& mediaId, const std::string& keyEvent);
+  void releaseSessionClient(const std::string& mediaId);
 
   LSHandle *lsHandle_ = nullptr;
   MediaSessionManager mediaSessionMgr_;
   MediaControlPrivate mediaControlPrivate_;
+
+  /* The registerMediaSession call of each session that subscribed, held
+   * (LSMessageRef) until the session ends. */
+  std::map<std::string, LSMessage *> sessionClients_;
 
   /* com.webos.service.bus/signal/registerServerStatus for bluetooth2. */
   LSMessageToken btServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;

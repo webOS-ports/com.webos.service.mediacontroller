@@ -111,35 +111,6 @@ public:
   std::string getGenre() const {return genre_;}
   int getTrackNumber() const {return trackNumber_;}
   int getVolume() const {return volume_;}
-
-  void setTitle(const std::string& title) {
-    if(!title.empty() && title_ != title)
-      title_ = title;
-  }
-  void setArtist(const std::string& artist) {
-    if(!artist.empty() && artist_ != artist)
-      artist_ = artist;
-  }
-  void setDuration(const std::string& duration) {
-    if(!duration.empty() && totalDuration_ != duration)
-      totalDuration_ = duration;
-  }
-  void setAlbum(const std::string& album) {
-    if(!album.empty() && album_ != album)
-      album_ = album;
-  }
-  void setGenre(const std::string& genre) {
-    if(!genre.empty() && genre_ != genre)
-      genre_ = genre;
-  }
-  void setTrackNumber(const int& trackNum) {
-    if(trackNum && trackNumber_ != trackNum)
-      trackNumber_ = trackNum;
-  }
-  void setVolume(const int& volume) {
-    if(volume && volume_ != volume)
-      volume_ = volume;
-  }
 };
 
 typedef struct {
@@ -240,14 +211,10 @@ public:
   void setPlayposition(const std::string& playPosition) {
     playPosition_ = playPosition;
   }
+  /* The metadata of what plays now, whole: a field the new track does
+   * not have must not keep the last track's. */
   void setMetaData(const mediaMetaData& objMetaData) {
-    objMetaData_.setTitle(objMetaData.getTitle());
-    objMetaData_.setArtist(objMetaData.getArtist());
-    objMetaData_.setDuration(objMetaData.getDuration());
-    objMetaData_.setAlbum(objMetaData.getAlbum());
-    objMetaData_.setGenre(objMetaData.getGenre());
-    objMetaData_.setTrackNumber(objMetaData.getTrackNumber());
-    objMetaData_.setVolume(objMetaData.getVolume());
+    objMetaData_ = objMetaData;
   }
 
   void setCoverArt(const std::vector<mediaCoverArt>& objCoverArt) {

@@ -302,29 +302,29 @@ bool MediaSessionManager::validatePlayStatus(const std::string& playStatus) {
     return false;
 }
 
-int MediaSessionManager::getDisplayIdForMedia(const std::string& mediaId) {
-  PMLOG_INFO(CONST_MODULE_MSM, "%s mediaId = %s", __FUNCTION__, mediaId.c_str());
-  for (const auto& itr : mapMediaSessionInfo_) {
-    if(mediaId == itr.first) {
-      std::string appId = itr.second.getAppId();
-      return (appId.back()-48);
-    }
-  }
+int MediaSessionManager::displayIdFromAppId(const std::string& appId) {
+#if defined(FEATURE_DUAL_DISPLAY)
+  if (!appId.empty() && appId.back() >= '0' && appId.back() <= '9')
+    return appId.back() - '0';
+#else
+  (void)appId;
+#endif
   return 0;
 }
 
-std::string MediaSessionManager::getMediaIdFromDisplayId(const int& displayId) {
+int MediaSessionManager::getDisplayIdForMedia(const std::string& mediaId) {
+  const auto& itr = mapMediaSessionInfo_.find(mediaId);
+  if (itr == mapMediaSessionInfo_.end())
+    return 0;
+  return displayIdFromAppId(itr->second.getAppId());
+}
+
+std::string MediaSessionManager::getMediaIdFromDisplayId(int displayId) {
   PMLOG_INFO(CONST_MODULE_MSM, "%s displayId = %d", __FUNCTION__, displayId);
-  for (const auto& itr : mapMediaSessionInfo_) {
-    std::string appId = itr.second.getAppId();
-    int appDisplayId = (appId.back()-48);
-#if !defined(FEATURE_DUAL_DISPLAY)
-    appDisplayId = 0;
-#endif
-    if(appDisplayId == displayId){
-      std::string mediaId = objRequestRcvr_.getLastActiveClient();
+  //the session on that display that was activated last
+  for (const auto& mediaId : objRequestRcvr_.getClientList()) {
+    if (getDisplayIdForMedia(mediaId) == displayId)
       return mediaId;
-    }
   }
   return CSTR_EMPTY;
 }

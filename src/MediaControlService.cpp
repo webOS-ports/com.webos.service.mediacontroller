@@ -102,6 +102,8 @@ bool MediaControlService::start(GMainLoop *loop) {
   }
   if (!LSRegisterCategory(lsHandle_, "/", mediaControlMethods, nullptr, nullptr, &lserror) ||
       !LSCategorySetData(lsHandle_, "/", this, &lserror) ||
+      !LSSubscriptionSetCancelFunction(lsHandle_, &MediaControlService::onSubscriptionCancel,
+                                       this, &lserror) ||
       !LSGmainAttach(lsHandle_, loop, &lserror)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s registering the methods failed: %s", __FUNCTION__, lserror.text());
     stop();
@@ -138,6 +140,12 @@ bool MediaControlService::start(GMainLoop *loop) {
 void MediaControlService::stop() {
   if (!lsHandle_)
     return;
+
+  /* The sessions' calls are held until the handle goes; its cancel
+   * function is not called for them then. */
+  for (auto& client : sessionClients_)
+    LSMessageUnref(client.second);
+  sessionClients_.clear();
 
   /* LSUnregister() ends every call and subscription on the handle; what is
    * recorded of them goes with it. */
@@ -476,15 +484,7 @@ bool MediaControlService::onBTAvrcpKeyEventsCb(LSHandle *, LSMessage *message, v
   if (mediaId.empty() || displayIdForMedia != 0)
     return true;
 
-  pbnjson::JValue responseObj = pbnjson::Object();
-  responseObj.put("keyEvent", keyCode);
-  responseObj.put("mediaId", mediaId);
-  responseObj.put("returnValue", true);
-  responseObj.put("subscribed", true);
-  PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responseObj.stringify().c_str());
-  CLSError lserror;
-  if (!LSSubscriptionReply(obj->lsHandle_, "registerMediaSession", responseObj.stringify().c_str(), &lserror))
-    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionReply failed", __FUNCTION__);
+  obj->sendKeyEvent(mediaId, keyCode);
   return true;
 }
 
@@ -546,58 +546,105 @@ bool MediaControlService::registerMediaSession(LSMessage& message) {
   LSMessageJsonParser msg(&message,STRICT_SCHEMA(PROPS_3(REQUIRED(mediaId, string),REQUIRED( \
   appId, string),REQUIRED(subscribe, boolean)) REQUIRED_3(mediaId, appId, subscribe)));
 
-  bool returnValue = false;
-  bool subscribed = false;
-  int errorCode = MCS_ERROR_NO_ERROR;
-  std::string errorText;
   pbnjson::JObject responseObj;
+  int errorCode = MCS_ERROR_NO_ERROR;
+  bool subscribed = false;
+  std::string mediaId;
+  std::string appId;
+
   if (!msg.parse(__FUNCTION__)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s Parsing failed", __FUNCTION__);
     errorCode = MCS_ERROR_PARSING_FAILED;
-    errorText = CSTR_PARSING_ERROR;
-    responseObj.put("subscribed", subscribed);
-    responseObj.put("returnValue", returnValue);
-    responseObj.put("errorCode", errorCode);
-    responseObj.put("errorText", errorText);
-    respond(message, responseObj.stringify());
-    return true;
+  } else {
+    pbnjson::JValue payload = msg.get();
+    mediaId = payload["mediaId"].asString();
+    appId = payload["appId"].asString();
+    PMLOG_INFO(CONST_MODULE_MCS, "%s mediaId : %s appId : %s subscribe : %d", __FUNCTION__,
+               mediaId.c_str(), appId.c_str(), payload["subscribe"].asBool());
+
+    if (mediaId.empty())
+      errorCode = MCS_ERROR_INVALID_MEDIAID;
+    else if (appId.empty())
+      errorCode = MCS_ERROR_INVALID_APPID;
+    else
+      errorCode = mediaSessionMgr_.addMediaSession(mediaId, appId);
   }
 
-  pbnjson::JValue payload = msg.get();
-  subscribed = payload["subscribe"].asBool();
-  std::string mediaId = payload["mediaId"].asString();
-  std::string appId = payload["appId"].asString();
-  PMLOG_INFO(CONST_MODULE_MCS, "%s mediaId : %s appId : %s subscribed : %d",
-                                __FUNCTION__, mediaId.c_str(), appId.c_str(), subscribed);
-
-  CLSError lserror;
-  if (LSMessageIsSubscription(&message)) {
-    if (!LSSubscriptionAdd(lsHandle_, "registerMediaSession", &message, &lserror)) {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionAdd failed ",__FUNCTION__);
-      subscribed = false;
+  /* The session is the caller's for as long as its call is open: the
+   * subscription is how key events reach it, and its cancel - the caller
+   * unsubscribing, or going away - ends the session. Added only once the
+   * session is, so that a second registration of a mediaId that is taken
+   * is not tied to the first one's session. */
+  if (errorCode == MCS_ERROR_NO_ERROR && LSMessageIsSubscription(&message)) {
+    CLSError lserror;
+    if (LSSubscriptionAdd(lsHandle_, "registerMediaSession", &message, &lserror)) {
+      LSMessageRef(&message);
+      sessionClients_[mediaId] = &message;
+      subscribed = true;
+    } else {
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionAdd failed: %s", __FUNCTION__, lserror.text());
+      mediaSessionMgr_.removeMediaSession(mediaId);
       errorCode = MCS_ERROR_REGISTERSESSION_FAILED;
-      errorText = CSTR_REGISTERSESSION_FAILED;
-      goto reply;
     }
   }
 
-  PMLOG_INFO(CONST_MODULE_MCS, "%s Subscribed successfully, add Media Session", __FUNCTION__);
-  errorCode = mediaSessionMgr_.addMediaSession(mediaId, appId);
-  if(MCS_ERROR_NO_ERROR == errorCode)
-    returnValue = true;
-
-  reply:
   responseObj.put("subscribed", subscribed);
-  responseObj.put("returnValue", returnValue);
-  if(!returnValue) {
-    errorText = getErrorTextFromErrorCode(errorCode);
+  responseObj.put("returnValue", errorCode == MCS_ERROR_NO_ERROR);
+  if (errorCode != MCS_ERROR_NO_ERROR) {
     responseObj.put("errorCode", errorCode);
-    responseObj.put("errorText", errorText);
+    responseObj.put("errorText", getErrorTextFromErrorCode(errorCode));
   }
 
   PMLOG_INFO(CONST_MODULE_MCS, "%s response : %s", __FUNCTION__, responseObj.stringify().c_str());
   respond(message, responseObj.stringify());
+  return true;
+}
 
+void MediaControlService::releaseSessionClient(const std::string& mediaId) {
+  auto client = sessionClients_.find(mediaId);
+  if (client == sessionClients_.end())
+    return;
+  LSMessageUnref(client->second);
+  sessionClients_.erase(client);
+}
+
+bool MediaControlService::onSubscriptionCancel(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  if (!obj)
+    return true;
+  for (const auto& client : obj->sessionClients_) {
+    if (client.second != message)
+      continue;
+    std::string mediaId = client.first;
+    PMLOG_INFO(CONST_MODULE_MCS, "%s session %s: its client has gone", __FUNCTION__, mediaId.c_str());
+    obj->mediaSessionMgr_.removeMediaSession(mediaId);
+    obj->releaseSessionClient(mediaId);
+    break;
+  }
+  return true;
+}
+
+bool MediaControlService::sendKeyEvent(const std::string& mediaId, const std::string& keyEvent) {
+  auto client = sessionClients_.find(mediaId);
+  if (client == sessionClients_.end()) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s session %s has no subscription to send %s on", __FUNCTION__,
+                mediaId.c_str(), keyEvent.c_str());
+    return false;
+  }
+
+  /* To that session's own call: every session is told only its own key
+   * events, not those of every other session as well. */
+  pbnjson::JValue responseObj = pbnjson::Object();
+  responseObj.put("keyEvent", keyEvent);
+  responseObj.put("mediaId", mediaId);
+  responseObj.put("returnValue", true);
+  responseObj.put("subscribed", true);
+  PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responseObj.stringify().c_str());
+  CLSError lserror;
+  if (!LSMessageRespond(client->second, responseObj.stringify().c_str(), &lserror)) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSMessageRespond failed: %s", __FUNCTION__, lserror.text());
+    return false;
+  }
   return true;
 }
 
@@ -623,6 +670,8 @@ bool MediaControlService::unregisterMediaSession(LSMessage& message) {
   PMLOG_INFO(CONST_MODULE_MCS, "%s mediaId : %s", __FUNCTION__, mediaId.c_str());
 
   errorCode = mediaSessionMgr_.removeMediaSession(mediaId);
+  if (MCS_ERROR_NO_ERROR == errorCode)
+    releaseSessionClient(mediaId);
 
   if(MCS_ERROR_NO_ERROR == errorCode)
     response = createJsonReplyString(true);
@@ -1613,32 +1662,19 @@ bool MediaControlService::injectMediaKeyEvent(LSMessage &message) {
   PMLOG_INFO(CONST_MODULE_MCS, "%s displayId : %d keyEvent : %s ",
                                 __FUNCTION__, displayId, keyEvent.c_str());
 
-  pbnjson::JValue responsePayload = pbnjson::Object();
   /*get mediaId from displayId*/
   std::string mediaId = mediaSessionMgr_.getMediaIdFromDisplayId(displayId);
-  if(!mediaId.c_str()) {
-    PMLOG_ERROR(CONST_MODULE_MCS, "%s get mediaId from displayId is invalid ", __FUNCTION__);
+  if (mediaId.empty()) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s no active session on display %d", __FUNCTION__, displayId);
     errorCode = MCS_ERROR_NO_ACTIVE_SESSION;
-    errorText = CSTR_NO_ACTIVE_SESSION;
-    response = createJsonReplyString(false, errorCode, errorText);
-    respond(message, response);
-    return true;
-  }
-  responsePayload.put("mediaId", mediaId);
-  responsePayload.put("keyEvent", keyEvent);
-  responsePayload.put("returnValue", true);
-  responsePayload.put("subscribed", true);
-  PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responsePayload.stringify().c_str());
-  response = createJsonReplyString(true);
-  /*LSSubscriptionReply for registerMediaSession*/
-  CLSError lserror;
-  if (!LSSubscriptionReply(lsHandle_,"registerMediaSession" , responsePayload.stringify().c_str(), &lserror)){
-    PMLOG_ERROR(CONST_MODULE_MCS,"%s LSSubscriptionReply failed", __FUNCTION__);
+  } else if (!sendKeyEvent(mediaId, keyEvent)) {
     errorCode = MCS_ERROR_SUBSCRIPTION_REPLY_FAILED;
-    errorText = CSTR_SUBSCRIPTION_REPLY_FAILED;
-    response = createJsonReplyString(false, errorCode, errorText);
   }
 
+  if (errorCode == MCS_ERROR_NO_ERROR)
+    response = createJsonReplyString(true);
+  else
+    response = createJsonReplyString(false, errorCode, getErrorTextFromErrorCode(errorCode));
   PMLOG_INFO(CONST_MODULE_MCS, "%s response : %s", __FUNCTION__, response.c_str());
   respond(message, response);
 
@@ -1784,21 +1820,8 @@ bool MediaControlService::testKeyEvent(LSMessage &message) {
   msg.get("mediaId", mediaId);
   PMLOG_INFO(CONST_MODULE_MCS, "%s mediaId : %s", __FUNCTION__, mediaId.c_str());
 
-  pbnjson::JValue responseObj = pbnjson::Object();
-
-  responseObj.put("keyEvent", keyCode);
-  responseObj.put("mediaId", mediaId);
-  responseObj.put("returnValue", true);
-  responseObj.put("subscribed", true);
-  PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responseObj.stringify().c_str());
-  CLSError lserror;
-  if (!LSSubscriptionReply(lsHandle_, "registerMediaSession",
-      responseObj.stringify().c_str(), &lserror))
-    PMLOG_ERROR(CONST_MODULE_MCS,"%s LSSubscriptionReply failed", __FUNCTION__);
-
-  pbnjson::JValue responseObj1 = pbnjson::Object();
-  responseObj1.put("returnValue", true);
-  respond(message, responseObj1.stringify());
+  sendKeyEvent(mediaId, keyCode);
+  respond(message, createJsonReplyString(true));
   return true;
 }
 #endif

@@ -21,8 +21,6 @@
  (File Inclusions)
  ------------------------------------------------------------------------------*/
 #include <string>
-#include <cstring>
-#include <iostream>
 #include <pbnjson.hpp>
 #include <luna-service2/lunaservice.h>
 
@@ -103,4 +101,4 @@ private:
 // build a standard json reply string without the overhead of using json schema
 std::string createJsonReplyString(bool returnValue = true, int errorCode = 0, const std::string& errorText = "" );
 
-#endif /*MEDIA_CONTROL_SERVICE_H_*/
+#endif /*LSUTILS_H_*/

@@ -15,24 +15,20 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /*-----------------------------------------------------------------------------
- #include
  (File Inclusions)
- -- ----------------------------------------------------------------------------*/
+ ------------------------------------------------------------------------------*/
 #include "MediaControlService.h"
 #include "Lsutils.h"
 
 #include <string>
-#include <iostream>
 
-const std::string cstrMediaControlService = "com.webos.service.mediacontroller";
-const std::string cstrBTAdapterGetStatus = "luna://com.webos.service.bluetooth2/adapter/getStatus";
-const std::string cstrBTDeviceGetStatus = "luna://com.webos.service.bluetooth2/device/getStatus";
-const std::string cstrBTAvrcpGetStatus = "luna://com.webos.service.bluetooth2/avrcp/getStatus";
-const std::string cstrBTAvrcpReceivePassThroughCommand = "luna://com.webos.service.bluetooth2/avrcp/receivePassThroughCommand";
-const std::string cstrSubscribe = "{\"subscribe\":true}";
-const std::string cstrBTNotifyMediaPlayStatus = "luna://com.webos.service.bluetooth2/avrcp/notifyMediaPlayStatus";
-
-const short dispId = 0;
+static constexpr const char *cstrMediaControlService = "com.webos.service.mediacontroller";
+static constexpr const char *cstrBTAdapterGetStatus = "luna://com.webos.service.bluetooth2/adapter/getStatus";
+static constexpr const char *cstrBTDeviceGetStatus = "luna://com.webos.service.bluetooth2/device/getStatus";
+static constexpr const char *cstrBTAvrcpGetStatus = "luna://com.webos.service.bluetooth2/avrcp/getStatus";
+static constexpr const char *cstrBTAvrcpReceivePassThroughCommand = "luna://com.webos.service.bluetooth2/avrcp/receivePassThroughCommand";
+static constexpr const char *cstrSubscribe = "{\"subscribe\":true}";
+static constexpr const char *cstrBTNotifyMediaPlayStatus = "luna://com.webos.service.bluetooth2/avrcp/notifyMediaPlayStatus";
 
 static void respond(LSMessage &message, const std::string &payload) {
   CLSError lserror;
@@ -90,7 +86,7 @@ bool MediaControlService::start(GMainLoop *loop) {
     return true;
 
   CLSError lserror;
-  if (!LSRegister(cstrMediaControlService.c_str(), &lsHandle_, &lserror)) {
+  if (!LSRegister(cstrMediaControlService, &lsHandle_, &lserror)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s LSRegister failed: %s", __FUNCTION__, lserror.text());
     lsHandle_ = nullptr;
     return false;
@@ -222,8 +218,8 @@ void MediaControlService::subscribeToBTAdapterGetStatus() {
 
   CLSError lserror;
   if (!LSCall(lsHandle_,
-              cstrBTAdapterGetStatus.c_str(),
-              cstrSubscribe.c_str(),
+              cstrBTAdapterGetStatus,
+              cstrSubscribe,
               &MediaControlService::onBTAdapterQueryCb,
               this, &btAdapterToken_, &lserror)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for adapter/getStatus", __FUNCTION__);
@@ -287,7 +283,7 @@ bool MediaControlService::onBTAdapterQueryCb(LSHandle *, LSMessage *message, voi
                adapterAddress.c_str());
     CLSError lserror;
     LSMessageToken token = LSMESSAGE_TOKEN_INVALID;
-    if (LSCall(obj->lsHandle_, cstrBTDeviceGetStatus.c_str(), request.stringify().c_str(),
+    if (LSCall(obj->lsHandle_, cstrBTDeviceGetStatus, request.stringify().c_str(),
                &MediaControlService::onBTDeviceGetStatusCb, obj, &token, &lserror))
       adapters[adapterAddress] = token;
     else
@@ -367,7 +363,7 @@ bool MediaControlService::onBTDeviceGetStatusCb(LSHandle *, LSMessage *message, 
     PMLOG_INFO(CONST_MODULE_MCS, "%s avrcp/getStatus for %s", __FUNCTION__, key.c_str());
     CLSError lserror;
     LSMessageToken token = LSMESSAGE_TOKEN_INVALID;
-    if (LSCall(obj->lsHandle_, cstrBTAvrcpGetStatus.c_str(), request.stringify().c_str(),
+    if (LSCall(obj->lsHandle_, cstrBTAvrcpGetStatus, request.stringify().c_str(),
                &MediaControlService::onBTAvrcpGetStatusCb, obj, &token, &lserror))
       connected[key] = token;
     else
@@ -435,7 +431,7 @@ bool MediaControlService::onBTAvrcpGetStatusCb(LSHandle *, LSMessage *message, v
   request.put("adapterAddress", adapterAddress);
   request.put("subscribe", true);
   CLSError lserror;
-  if (!LSCall(obj->lsHandle_, cstrBTAvrcpReceivePassThroughCommand.c_str(),
+  if (!LSCall(obj->lsHandle_, cstrBTAvrcpReceivePassThroughCommand,
               request.stringify().c_str(), &MediaControlService::onBTAvrcpKeyEventsCb,
               obj, &device.passThroughToken_, &lserror)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for avrcp/receivePassThroughCommand", __FUNCTION__);
@@ -522,7 +518,7 @@ void MediaControlService::notifyBTPlayStatus(const std::string& mediaId,
     request.put("playbackStatus", playStatusObj);
 
     CLSError lserror;
-    if (!LSCallOneReply(lsHandle_, cstrBTNotifyMediaPlayStatus.c_str(), request.stringify().c_str(),
+    if (!LSCallOneReply(lsHandle_, cstrBTNotifyMediaPlayStatus, request.stringify().c_str(),
                         NULL, NULL, NULL, &lserror))
       PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed to avrcp/notifyMediaPlayStatus", __FUNCTION__);
   }

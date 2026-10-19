@@ -18,6 +18,8 @@
 #include "Lsutils.h"
 #include "MediaControlTypes.h"
 
+#include <cstring>
+
 LSMessageJsonParser::LSMessageJsonParser(LSMessage * message,
                                          const char * schema) :
                                          mMessage_(message),

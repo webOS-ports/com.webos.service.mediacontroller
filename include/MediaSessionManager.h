@@ -21,6 +21,7 @@
     (File Inclusions)
 ------------------------------------------------------------------------------*/
 #include <map>
+#include <string>
 #include <vector>
 #include "MediaControlTypes.h"
 #include "RequestReceiver.h"
@@ -30,6 +31,9 @@ class MediaSessionManager
 private:
   std::map<std::string, mediaSession> mapMediaSessionInfo_;
   RequestReceiver objRequestRcvr_;
+
+  //! The session, or null - logged as caller's - if there is none.
+  mediaSession *find(const std::string& mediaId, const char *caller);
 
 public:
   MediaSessionManager();
@@ -68,12 +72,13 @@ public:
                          const std::string& muteStatus);
   int setMediaPlayPosition(const std::string& mediaId,
                            const std::string& playPosition);
-  std::vector<std::string> getMediaSessionList(const std::string& appId);
-  std::vector<std::string> getActiveMediaSessionList();
-  std::string getCurrentActiveSession();
-  bool validatePlayStatus(const std::string& playStatus);
-  int getDisplayIdForMedia(const std::string& mediaId);
-  std::string getMediaIdFromDisplayId(int displayId);
+  std::vector<std::string> getMediaSessionList(const std::string& appId) const;
+  //! Active sessions, the last activated first.
+  std::vector<std::string> getActiveMediaSessionList() const;
+  std::string getCurrentActiveSession() const;
+  static bool validatePlayStatus(const std::string& playStatus);
+  int getDisplayIdForMedia(const std::string& mediaId) const;
+  std::string getMediaIdFromDisplayId(int displayId) const;
   //! The display an app is on: with FEATURE_DUAL_DISPLAY the last
   //! character of its appId, when that is a digit; else 0.
   static int displayIdFromAppId(const std::string& appId);

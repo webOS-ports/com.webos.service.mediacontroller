@@ -25,34 +25,31 @@
 #include "PmLogLib.h"
 #include <luna-service2/lunaservice.h>
 
-const std::string CSTR_INVALID_MEDIAID = "Invalid mediaId";
-const std::string CSTR_REGISTERSESSION_FAILED = "MediaId registeration failed";
-const std::string CSTR_PARSING_ERROR = "Parsing Error";
-const std::string CSTR_INVALID_APPID = "Invalid appId";
-const std::string CSTR_NO_ACTIVE_SESSION = "No session is active";
-const std::string CSTR_SESSION_ALREADY_REGISTERED = "Media session already registered";
-const std::string CSTR_SESSION_INVALID_PLAY_STATE = "Invalid Play State";
-const std::string CSTR_SESSION_INVALID_MUTE_STATUS = "Invalid Mute Status";
-const std::string CSTR_SUBSCRIPTION_FAILED = "LSSubscriptionAdd failed";
-const std::string CSTR_SUBSCRIPTION_REPLY_FAILED = "LSSubscriptionReply failed";
-const std::string CSTR_EMPTY = "";
-const std::string CTSR_INVALID_DISPLAYID = "Invalid displayId";
-const std::string CTSR_INVALID_EVENT = "Invalid Event";
+inline const std::string CSTR_INVALID_MEDIAID = "Invalid mediaId";
+inline const std::string CSTR_REGISTERSESSION_FAILED = "MediaId registeration failed";
+inline const std::string CSTR_PARSING_ERROR = "Parsing Error";
+inline const std::string CSTR_INVALID_APPID = "Invalid appId";
+inline const std::string CSTR_NO_ACTIVE_SESSION = "No session is active";
+inline const std::string CSTR_SESSION_ALREADY_REGISTERED = "Media session already registered";
+inline const std::string CSTR_SESSION_INVALID_PLAY_STATE = "Invalid Play State";
+inline const std::string CSTR_SESSION_INVALID_MUTE_STATUS = "Invalid Mute Status";
+inline const std::string CSTR_SUBSCRIPTION_FAILED = "LSSubscriptionAdd failed";
+inline const std::string CSTR_SUBSCRIPTION_REPLY_FAILED = "LSSubscriptionReply failed";
+inline const std::string CSTR_EMPTY = "";
+inline const std::string CTSR_INVALID_DISPLAYID = "Invalid displayId";
+inline const std::string CTSR_INVALID_EVENT = "Invalid Event";
 
 #define CONST_MODULE_MCS "MediaControlService"
 #define CONST_MODULE_MCP "MediaControlPrivate"
 #define CONST_MODULE_MSM "MediaSessionManager"
 #define CONST_MODULE_RR  "RequestReceiver"
 #define CONST_MODULE_MCD  "MediaControlDownloader"
-#define CONST_MODULE_MCFM  "MediaControlFileManager"
 
-#define SET 1
-#define RESET 0
+#define PMLOG_ERROR(module, ...) PmLogMsg(getLunaPmLogContext(), Error, module, 0, __VA_ARGS__)
+#define PMLOG_INFO(module, ...) PmLogMsg(getLunaPmLogContext(), Info, module, 0, __VA_ARGS__)
 
-#define PMLOG_ERROR(module, args...) PmLogMsg(getLunaPmLogContext(), Error, module, 0, ##args)
-#define PMLOG_INFO(module, args...) PmLogMsg(getLunaPmLogContext(), Info, module, 0, ##args)
-#define PMLOG_DEBUG(args...) PmLogMsg(getLunaPmLogContext(), Debug, NULL, 0, ##args)
-
+/* The errorCode of a failed call, as it goes on the bus. The numbers are
+ * the API: an invalid mediaId is 0, and 10 is not an error at all. */
 enum MCSErrorCode {
   MCS_ERROR_INVALID_MEDIAID = 0,
   MCS_ERROR_REGISTERSESSION_FAILED,
@@ -67,17 +64,6 @@ enum MCSErrorCode {
   MCS_ERROR_NO_ERROR,
   MCS_ERROR_INVALID_DISPLAYID,
   MCS_ERROR_INVALID_EVENT
-};
-
-enum MediaPlayState {
-  PLAY_STATE_NONE = 0,
-  PLAY_STATE_STOPPED,
-  PLAY_STATE_PAUSED,
-  PLAY_STATE_PLAYING,
-  PLAY_STATE_FAST_FORWARDING,
-  PLAY_STATE_REWINDING,
-  PLAY_STATE_BUFFERING,
-  PLAY_STATE_ERROR
 };
 
 class mediaMetaData {
@@ -95,7 +81,7 @@ public:
     volume_(0) {}
   mediaMetaData(const std::string& title, const std::string& artist,
                 const std::string& duration, const std::string& album,
-                const std::string& genre, const int& trackNumber, const int& volume) :
+                const std::string& genre, int trackNumber, int volume) :
     title_(title),
     artist_(artist),
     totalDuration_(duration),
@@ -113,16 +99,10 @@ public:
   int getVolume() const {return volume_;}
 };
 
-typedef struct {
+struct coverArtSize {
   int width;
   int height;
-
-  //TODO Overload the == operator to compare two coverArtSize struct
-  //bool operator!=(const coverArtSize& other) const {
-  //  return (width != other.width) || (height != other.height);
-  //}
-
-} coverArtSize;
+};
 
 class mediaCoverArt {
 private:
@@ -130,11 +110,9 @@ private:
   std::string type_;
   std::vector<coverArtSize> size_;
 public:
-  mediaCoverArt() :
-    src_(""),
-    type_("") {}
+  mediaCoverArt() {}
   mediaCoverArt(const std::string& src, const std::string& type,
-                const std::vector<coverArtSize> size) :
+                std::vector<coverArtSize> size) :
     src_(src),
     type_(type),
     size_(std::move(size)) {}
@@ -143,17 +121,6 @@ public:
   std::string getType() const {return type_;}
   std::vector<coverArtSize> getSize() const {return size_;}
 
-  void setSource(const std::string& src) {
-    if(!src.empty() && src_ != src)
-      src_ = src;
-  }
-  void setType(const std::string& type) {
-    if(!type.empty() && type_ != type)
-      type_ = type;
-  }
-  void setSize(const std::vector<coverArtSize> size) {
-    size_ = std::move(size);
-  }
 };
 
 class mediaSession {
@@ -196,12 +163,6 @@ public:
 
   std::vector<std::string> getActionObj() const { return enableActions_; }
 
-  void setMediaId(const std::string& mediaId) {
-    mediaId_ = mediaId;
-  }
-  void setAppId(const std::string& appId) {
-    appId_ = appId;
-  }
   void setPlayStatus(const std::string& playStatus) {
     playStatus_ = playStatus;
   }
@@ -240,7 +201,7 @@ struct BTDeviceInfo {
   {}
 };
 
-static std::string getErrorTextFromErrorCode(const int& errorCode) {
+inline std::string getErrorTextFromErrorCode(int errorCode) {
   switch(errorCode) {
     case MCS_ERROR_INVALID_MEDIAID:
       return CSTR_INVALID_MEDIAID;
@@ -271,11 +232,15 @@ static std::string getErrorTextFromErrorCode(const int& errorCode) {
   }
 }
 
-static PmLogContext getLunaPmLogContext() {
-  static PmLogContext logContext = 0;
-  if (0 == logContext)
-    PmLogGetContext("mediacontroller", &logContext);
+/* One context for the process, looked up once, from whichever thread logs
+ * first. */
+inline PmLogContext getLunaPmLogContext() {
+  static const PmLogContext logContext = [] {
+    PmLogContext context = nullptr;
+    PmLogGetContext("mediacontroller", &context);
+    return context;
+  }();
   return logContext;
 }
 
-#endif /*MEDIA_CONTROL_SERVICE_H_*/
+#endif /*MEDIA_CONTROL_TYPES_H_*/

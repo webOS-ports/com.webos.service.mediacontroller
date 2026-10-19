@@ -85,9 +85,9 @@ public:
   static bool onBTDeviceGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTAvrcpGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTAvrcpKeyEventsCb(LSHandle *lshandle, LSMessage *message, void *ctx);
-  int updateMetaDataResponse(const std::string &,  pbnjson::JObject &);
 
 private:
+  int updateMetaDataResponse(const std::string &mediaId, pbnjson::JObject &metaDataObj);
   void subscribeToBTAdapterGetStatus();
   void dropBluetooth();
   void dropBTDevice(const std::string& address, const std::string& adapterAddress);

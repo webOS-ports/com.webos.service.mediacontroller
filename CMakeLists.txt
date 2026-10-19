@@ -79,7 +79,7 @@ if(MCS_TEST_METHODS)
 add_definitions(-DUSE_TEST_METHOD)
 endif()
 
-webos_add_compiler_flags(ALL -Wall -funwind-tables -Werror=return-type)
+webos_add_compiler_flags(ALL -Wall -Wextra -funwind-tables -Werror=return-type)
 
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/files/)

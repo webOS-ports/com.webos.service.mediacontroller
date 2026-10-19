@@ -14,7 +14,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-cmake_minimum_required(VERSION 2.8.7)
+cmake_minimum_required(VERSION 3.20)
 
 IF(NOT DEFINED SERVICE_NAME)
 set(SERVICE_NAME com.webos.service.mediacontrollertest)
@@ -22,9 +22,6 @@ endif(NOT DEFINED SERVICE_NAME)
 add_definitions(-DSERVICE_NAME="${SERVICE_NAME}")
 
 project(com.webos.service.mediacontrollertest CXX)
-set(CMAKE_BUILD_TYPE Debug)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -g -Werror=return-type")
 
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/files/)

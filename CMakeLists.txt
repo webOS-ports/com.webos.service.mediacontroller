@@ -14,9 +14,21 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
-cmake_minimum_required(VERSION 2.8.7)
+cmake_minimum_required(VERSION 3.20)
 project(com.webos.service.mediacontroller CXX)
-set(CMAKE_BUILD_TYPE Debug)
+
+# Off unless asked for: neither belongs in what ships.
+# MCS_TEST_METHODS registers testKeyEvent, which sends any key event to any
+# session and is in no ACG group. It used to come in with a forced
+# CMAKE_BUILD_TYPE Debug, overriding whatever the build system asked for.
+# MCS_MANUAL_TEST_CLIENTS builds and installs the hand-driven clients in
+# test/, along with a test service holding oem trust and "*" outbound.
+option(MCS_TEST_METHODS "Register the testKeyEvent bus method" OFF)
+option(MCS_MANUAL_TEST_CLIENTS "Build and install the manual test clients in test/" OFF)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 include(webOS/webOS)
 webos_modules_init(1 6 3)
@@ -45,14 +57,11 @@ pkg_check_modules(PBNJSON_CPP REQUIRED pbnjson_cpp)
 include_directories(${PBNJSON_CPP_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${PBNJSON_CPP_CFLAGS})
 
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+if(MCS_TEST_METHODS)
 add_definitions(-DUSE_TEST_METHOD)
 endif()
 
-webos_add_compiler_flags(ALL -Wall -funwind-tables)
-webos_add_compiler_flags(ALL -Wall -rdynamic)
-
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -g -Werror=return-type")
+webos_add_compiler_flags(ALL -Wall -funwind-tables -Werror=return-type)
 
 include_directories(${CMAKE_SOURCE_DIR})
 include_directories(${CMAKE_SOURCE_DIR}/files/)
@@ -69,7 +78,9 @@ include_directories(${CMAKE_SOURCE_DIR}/include/)
 include_directories(${CMAKE_SOURCE_DIR}/src/fileManager/)
 include_directories(${CMAKE_SOURCE_DIR}/src/fileDownloader/)
 
+if(MCS_MANUAL_TEST_CLIENTS)
 add_subdirectory(${CMAKE_SOURCE_DIR}/test/)
+endif()
 
 set(SRC_LIST
     ${CMAKE_SOURCE_DIR}/src/MediaControlService.cpp
@@ -86,6 +97,9 @@ set(SRC_LIST
 
 add_executable(${PROJECT_NAME}
                ${SRC_LIST})
+# -rdynamic, so a backtrace names the daemon's own functions. It used to be
+# passed as a compiler flag, where it did nothing.
+set_property(TARGET ${PROJECT_NAME} PROPERTY ENABLE_EXPORTS ON)
 
 target_link_libraries(${PROJECT_NAME}
                       ${GLIB2_LDFLAGS}
@@ -94,6 +108,7 @@ target_link_libraries(${PROJECT_NAME}
                       ${PMLOGLIB_LDFLAGS}
                       ${CURL_LDFLAGS})
 
+if(MCS_MANUAL_TEST_CLIENTS)
 #MediaControllerServiceTest project exe
 set (SRC_TEST ${CMAKE_SOURCE_DIR}/test/MediaControllerServiceTest.cpp)
 add_executable (MCSTestApp ${SRC_TEST})
@@ -103,6 +118,7 @@ install(TARGETS MCSTestApp DESTINATION ${WEBOS_INSTALL_TESTSDIR}/${PROJECT_NAME}
 set (SRC_KEY_TEST ${CMAKE_SOURCE_DIR}/test/MediaControllerKeyEventTest.cpp)
 add_executable (MCSKeyEventTestApp ${SRC_KEY_TEST})
 install(TARGETS MCSKeyEventTestApp DESTINATION ${WEBOS_INSTALL_TESTSDIR}/${PROJECT_NAME})
+endif()
 
 install(TARGETS ${PROJECT_NAME} DESTINATION ${WEBOS_INSTALL_SBINDIR})
 if(${USE_NEW_ACG})

@@ -84,6 +84,7 @@ size_t writeData(char *data, size_t size, size_t count, void *userp) {
 struct Transfer {
   const std::atomic<bool> *stopping;
   bool anyAddress;
+  bool refused; //!< an address was refused: no point trying again
 };
 
 int progress(void *userp, curl_off_t, curl_off_t, curl_off_t, curl_off_t) {
@@ -96,6 +97,7 @@ curl_socket_t openSocket(void *userp, curlsocktype purpose, struct curl_sockaddr
   if (purpose != CURLSOCKTYPE_IPCXN)
     return CURL_SOCKET_BAD;
   if (!transfer->anyAddress && !CoverArtFetcher::publicAddress(&address->addr, address->addrlen)) {
+    transfer->refused = true;
     PMLOG_ERROR(CONST_MODULE_MCD, "cover art: refusing to connect to a local or private address");
     return CURL_SOCKET_BAD;
   }
@@ -374,7 +376,7 @@ bool CoverArtFetcher::attempt(const std::string &url, const std::string &target,
   }
 
   Sink sink = {fd, 0, false};
-  Transfer transfer = {&stopping_, anyAddress_.load()};
+  Transfer transfer = {&stopping_, anyAddress_.load(), false};
   bool set =
       curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
       curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https") == CURLE_OK &&
@@ -412,7 +414,7 @@ bool CoverArtFetcher::attempt(const std::string &url, const std::string &target,
   }
   if (!ok) {
     unlink(name.data());
-    transient = !sink.tooLarge && transientError(rc, status);
+    transient = !sink.tooLarge && !transfer.refused && transientError(rc, status);
     PMLOG_ERROR(CONST_MODULE_MCD, "%s %s: %s, HTTP %ld%s", __FUNCTION__, redact(url).c_str(),
                 curl_easy_strerror(rc), status, sink.tooLarge ? ", too large" : "");
     return false;

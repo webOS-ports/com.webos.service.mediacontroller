@@ -16,11 +16,10 @@
 
 /*-----------------------------------------------------------------------------*/
 #include "MediaControlPrivate.h"
-#include "MediaSessionManager.h"
 
 MediaControlPrivate::MediaControlPrivate() :
-  mapDeviceInfo_(), playStatus_(false), muteStatus_(false),
-  playPosition_(false), mediaMetaData_(false), coverArt_(false), enableMediaAction_(false) {
+  playStatus_(false), muteStatus_(false), playPosition_(false),
+  mediaMetaData_(false), coverArt_(false), enableMediaAction_(false), mapDeviceInfo_() {
 }
 
 MediaControlPrivate& MediaControlPrivate::getInstance() {
@@ -28,72 +27,47 @@ MediaControlPrivate& MediaControlPrivate::getInstance() {
   return objMediaCtrlPrivate;
 }
 
+static std::string deviceKey(const std::string& address, const std::string& adapterAddress) {
+  return adapterAddress + "/" + address;
+}
+
 void MediaControlPrivate::setBTDeviceInfo(const BTDeviceInfo& objDevInfo) {
-  PMLOG_INFO(CONST_MODULE_MCP, "%s Connected device", __FUNCTION__);
-  //add Device to the map
-  std::string deviceAddress = objDevInfo.deviceAddress_;
-  PMLOG_INFO(CONST_MODULE_MCP, "%s Connected device device Address : %s", __FUNCTION__, deviceAddress.c_str());
-  mapDeviceInfo_[deviceAddress] = objDevInfo;
+  PMLOG_INFO(CONST_MODULE_MCP, "%s device %s on adapter %s", __FUNCTION__,
+             objDevInfo.deviceAddress_.c_str(), objDevInfo.adapterAddress_.c_str());
+  mapDeviceInfo_[deviceKey(objDevInfo.deviceAddress_, objDevInfo.adapterAddress_)] = objDevInfo;
 }
 
-bool MediaControlPrivate::getBTDeviceInfo(const int& displayId, BTDeviceInfo *objDevInfo) {
-  PMLOG_INFO(CONST_MODULE_MCP, "%s Connected device GetBTdeviceInfo ", __FUNCTION__);
-  for(const auto& itr : mapDeviceInfo_) {
-    if(itr.second.displayId_ == displayId) {
-      objDevInfo->deviceAddress_ = itr.first;
-      objDevInfo->adapterAddress_ = itr.second.adapterAddress_;
-      objDevInfo->displayId_ = itr.second.displayId_;
-      return true;
-    }
+bool MediaControlPrivate::removeBTDevice(const std::string& address, const std::string& adapterAddress,
+                                         BTDeviceInfo *removed) {
+  auto itr = mapDeviceInfo_.find(deviceKey(address, adapterAddress));
+  if (itr == mapDeviceInfo_.end())
+    return false;
+  PMLOG_INFO(CONST_MODULE_MCP, "%s device %s on adapter %s", __FUNCTION__,
+             address.c_str(), adapterAddress.c_str());
+  if (removed)
+    *removed = itr->second;
+  mapDeviceInfo_.erase(itr);
+  return true;
+}
+
+std::vector<BTDeviceInfo> MediaControlPrivate::getBTDevices(int displayId) const {
+  std::vector<BTDeviceInfo> devices;
+  for (const auto& itr : mapDeviceInfo_) {
+    if (itr.second.displayId_ == displayId)
+      devices.push_back(itr.second);
   }
-  return false;
+  return devices;
 }
 
-bool MediaControlPrivate::isDeviceRegistered(const std::string& address, const std::string& adapterAddress) {
-  for(const auto& itr : mapDeviceInfo_) {
-    if(itr.first == address && itr.second.adapterAddress_ == adapterAddress)
-      return true;
-  }
-  return false;
+std::vector<BTDeviceInfo> MediaControlPrivate::takeBTDevices() {
+  std::vector<BTDeviceInfo> devices;
+  for (auto& itr : mapDeviceInfo_)
+    devices.push_back(std::move(itr.second));
+  mapDeviceInfo_.clear();
+  return devices;
 }
 
-
-std::string MediaControlPrivate::getMediaId(const std::string& deviceAddress) {
-  PMLOG_INFO(CONST_MODULE_MCP, "%s for device Address : %s", __FUNCTION__, deviceAddress.c_str());
-  std::string mediaId;
-  for(const auto& itr : mapDeviceInfo_) {
-    if(itr.first == deviceAddress) {
-      mediaId = MediaSessionManager::getInstance().getCurrentActiveSession();
-      return mediaId;
-    }
-  }
-  return mediaId;
-}
-
-void MediaControlPrivate::setSessionListInfo(const BTDeviceInfo& btInfo) {
-  PMLOG_INFO(CONST_MODULE_MCP, "%s ", __FUNCTION__);
-  //add deviceSetId and displayId info to the vector
-  btAdapterInfo_.push_back(btInfo);
-}
-
-void MediaControlPrivate::setBTAdapterInfo(const std::string& deviceSetId, const std::string& adapterAddress) {
-  PMLOG_INFO(CONST_MODULE_MCP, " %s ", __FUNCTION__);
-  //add adapter address info to the vector
-  std::vector<BTDeviceInfo>::iterator it;
-  for (it = btAdapterInfo_.begin(); it != btAdapterInfo_.end(); it++) {
-    if (it->deviceSetId_ == deviceSetId) {
-      it->adapterAddress_ = adapterAddress;
-      break;
-    }
-  }
-}
-
-int MediaControlPrivate::getDisplayIdForBT(const std::string& adapterAddress) {
-  PMLOG_INFO(CONST_MODULE_MCP, " %s ", __FUNCTION__);
-  for(const auto& itr : btAdapterInfo_) {
-    if(itr.adapterAddress_ == adapterAddress) {
-      return itr.displayId_;
-    }
-  }
-  return -1;
+bool MediaControlPrivate::isDeviceRegistered(const std::string& address,
+                                             const std::string& adapterAddress) const {
+  return mapDeviceInfo_.count(deviceKey(address, adapterAddress)) != 0;
 }

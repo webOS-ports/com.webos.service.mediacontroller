@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 #include "PmLogLib.h"
+#include <luna-service2/lunaservice.h>
 
 const std::string CSTR_INVALID_MEDIAID = "Invalid mediaId";
 const std::string CSTR_REGISTERSESSION_FAILED = "MediaId registeration failed";
@@ -261,14 +262,13 @@ public:
 struct BTDeviceInfo {
   std::string deviceAddress_;
   std::string adapterAddress_;
-  std::string deviceSetId_;
-  int displayId_ = -1;
+  int displayId_ = 0;
+  /* The device's avrcp/receivePassThroughCommand subscription. */
+  LSMessageToken passThroughToken_ = LSMESSAGE_TOKEN_INVALID;
   BTDeviceInfo() {}
-  BTDeviceInfo(const std::string& address, const std::string &adapterAddress, std::string deviceSetId,
-               const int& displayId = -1) :
+  BTDeviceInfo(const std::string& address, const std::string &adapterAddress, int displayId = 0) :
     deviceAddress_(address),
     adapterAddress_(adapterAddress),
-    deviceSetId_(std::move(deviceSetId)),
     displayId_(displayId)
   {}
 };

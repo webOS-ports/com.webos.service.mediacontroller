@@ -32,10 +32,7 @@ const std::string cstrBTAvrcpGetStatus = "luna://com.webos.service.bluetooth2/av
 const std::string cstrBTAvrcpReceivePassThroughCommand = "luna://com.webos.service.bluetooth2/avrcp/receivePassThroughCommand";
 const std::string cstrSubscribe = "{\"subscribe\":true}";
 const std::string cstrBTNotifyMediaPlayStatus = "luna://com.webos.service.bluetooth2/avrcp/notifyMediaPlayStatus";
-const std::string cstrGetSessions = "luna://com.webos.service.account/getSessions";
 const std::string MEDIA_SESSION_FOLDER = "/media/internal/.media-session";
-
-bool BTConnected_ = false;
 
 const short dispId = 0;
 
@@ -103,300 +100,392 @@ MediaControlService::MediaControlService()
   g_main_loop_run(main_loop_ptr_.get());
 }
 
-bool MediaControlService::onBTServerStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx) {
-  PMLOG_INFO(CONST_MODULE_MCS,"%s IN", __FUNCTION__);
+/* A reply from bluetooth2, as JSON; null if it is not JSON at all. Only the
+ * fields used are read, each checked for its type, so a field bluetooth2
+ * adds later does not make a whole reply unreadable. */
+static pbnjson::JValue btReply(LSMessage *message) {
+  const char *payload = LSMessageGetPayload(message);
+  if (!payload)
+    return pbnjson::JValue();
+  pbnjson::JValue reply = pbnjson::JDomParser::fromString(payload);
+  if (!reply.isObject()) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "bluetooth2 reply is not a JSON object");
+    return pbnjson::JValue();
+  }
+  return reply;
+}
 
-  LS::Message response(message);
-  pbnjson::JValue payload = pbnjson::JDomParser::fromString(response.getPayload());
-  if(payload.isNull())
+static bool btBool(const pbnjson::JValue& reply, const char *name) {
+  return reply[name].isBoolean() && reply[name].asBool();
+}
+
+static std::string btString(const pbnjson::JValue& reply, const char *name) {
+  return reply[name].isString() ? reply[name].asString() : std::string();
+}
+
+/* The key of the entry in tokens that a reply belongs to, empty if none. */
+static std::string keyOfCall(const std::map<std::string, LSMessageToken>& tokens,
+                             LSMessage *reply) {
+  LSMessageToken token = LSMessageGetResponseToken(reply);
+  for (const auto& held : tokens) {
+    if (held.second == token)
+      return held.first;
+  }
+  return std::string();
+}
+
+void MediaControlService::cancelCall(LSMessageToken& token) {
+  if (token == LSMESSAGE_TOKEN_INVALID)
+    return;
+  CLSError lserror;
+  if (!LSCallCancel(lsHandle_, token, &lserror))
+    PMLOG_INFO(CONST_MODULE_MCS, "%s call %lu was already over", __FUNCTION__,
+               static_cast<unsigned long>(token));
+  token = LSMESSAGE_TOKEN_INVALID;
+}
+
+bool MediaControlService::onBTServerStatusCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
     return true;
 
-  bool connected = payload["connected"].asBool();
-  if(connected) {
-    PMLOG_INFO(CONST_MODULE_MCS, "%s BT service running", __FUNCTION__);
-    MediaControlService *ptrService = static_cast<MediaControlService*>(ctx);
-    if(ptrService) {
-      // get BT to get connected devices
-      ptrService->subscribeToBTAdapterGetStatus();
-    }
+  if (btBool(payload, "connected")) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s bluetooth2 is up", __FUNCTION__);
+    obj->subscribeToBTAdapterGetStatus();
+  } else {
+    /* Every subscription on it ended with it; a new instance knows nothing
+     * of them. Start again from adapter/getStatus when it is back. */
+    PMLOG_INFO(CONST_MODULE_MCS, "%s bluetooth2 is down", __FUNCTION__);
+    obj->dropBluetooth();
   }
   return true;
 }
 
 void MediaControlService::subscribeToBTAdapterGetStatus() {
-  PMLOG_INFO(CONST_MODULE_MCS,"%s IN", __FUNCTION__);
-  CLSError lserror;
+  if (btAdapterToken_ != LSMESSAGE_TOKEN_INVALID)
+    return;
 
-  if(!LSCall(lsHandle_,
-             cstrBTAdapterGetStatus.c_str(),
-             cstrSubscribe.c_str(),
-             &MediaControlService::onBTAdapterQueryCb,
-             this, NULL, &lserror))
-    PMLOG_ERROR(CONST_MODULE_MCS,"%s LS Call error for BT adapter/GetStatus", __FUNCTION__);
+  CLSError lserror;
+  if (!LSCall(lsHandle_,
+              cstrBTAdapterGetStatus.c_str(),
+              cstrSubscribe.c_str(),
+              &MediaControlService::onBTAdapterQueryCb,
+              this, &btAdapterToken_, &lserror)) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for adapter/getStatus", __FUNCTION__);
+    btAdapterToken_ = LSMESSAGE_TOKEN_INVALID;
+  }
 }
 
-bool MediaControlService::onBTAdapterQueryCb(LSHandle *lshandle, LSMessage *message, void *ctx) {
-  LSMessageJsonParser msg(message,SCHEMA_5(REQUIRED(subscribed, boolean), \
-  REQUIRED(adapters, array),REQUIRED(returnValue, boolean),REQUIRED \
-  (errorCode,integer),REQUIRED(errorText, string)));
+void MediaControlService::dropBluetooth() {
+  cancelCall(btAdapterToken_);
+  for (auto& held : btDeviceTokens_)
+    cancelCall(held.second);
+  btDeviceTokens_.clear();
+  for (auto& held : avrcpStatusTokens_)
+    cancelCall(held.second);
+  avrcpStatusTokens_.clear();
+  for (auto& device : ptrMediaControlPrivate_->takeBTDevices())
+    cancelCall(device.passThroughToken_);
+}
 
-  if (!msg.parse(__FUNCTION__)) {
-    PMLOG_ERROR(CONST_MODULE_MCS,"%s parse failure", __FUNCTION__);
+void MediaControlService::dropBTDevice(const std::string& address,
+                                       const std::string& adapterAddress) {
+  BTDeviceInfo device;
+  if (ptrMediaControlPrivate_->removeBTDevice(address, adapterAddress, &device))
+    cancelCall(device.passThroughToken_);
+}
+
+bool MediaControlService::onBTAdapterQueryCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
+    return true;
+
+  if (!btBool(payload, "returnValue")) {
+    /* The subscription is over: bluetooth2 went, or refused it. */
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s adapter/getStatus failed: %s", __FUNCTION__,
+                btString(payload, "errorText").c_str());
+    if (LSMessageGetResponseToken(message) == obj->btAdapterToken_)
+      obj->btAdapterToken_ = LSMESSAGE_TOKEN_INVALID;
     return true;
   }
-  bool returnValue = false;
-  msg.get("returnValue", returnValue);
-  if (returnValue) {
-    std::string deviceSetId;
-    pbnjson::JValue adapterStatus = msg.get();
-    pbnjson::JValue adapters = adapterStatus["adapters"];
-    if (!adapters.isArray()) {
-      PMLOG_ERROR(CONST_MODULE_MCS,"%s no adapters available", __FUNCTION__);
-      return true;
+
+  /* One device/getStatus subscription per adapter there is now. */
+  std::map<std::string, LSMessageToken> adapters;
+  pbnjson::JValue list = payload["adapters"];
+  for (int i = 0; list.isArray() && i < list.arraySize(); i++) {
+    std::string adapterAddress = btString(list[i], "adapterAddress");
+    if (adapterAddress.empty() || adapters.count(adapterAddress))
+      continue;
+
+    auto held = obj->btDeviceTokens_.find(adapterAddress);
+    if (held != obj->btDeviceTokens_.end()) {
+      adapters.insert(*held);
+      obj->btDeviceTokens_.erase(held);
+      continue;
     }
 
-    if (0 == adapters.arraySize()) {
-      PMLOG_ERROR(CONST_MODULE_MCS,"%s adapters empty array",__FUNCTION__);
-      return true;
+    pbnjson::JValue request = pbnjson::Object();
+    request.put("adapterAddress", adapterAddress);
+    request.put("subscribe", true);
+    PMLOG_INFO(CONST_MODULE_MCS, "%s device/getStatus for adapter %s", __FUNCTION__,
+               adapterAddress.c_str());
+    CLSError lserror;
+    LSMessageToken token = LSMESSAGE_TOKEN_INVALID;
+    if (LSCall(obj->lsHandle_, cstrBTDeviceGetStatus.c_str(), request.stringify().c_str(),
+               &MediaControlService::onBTDeviceGetStatusCb, obj, &token, &lserror))
+      adapters[adapterAddress] = token;
+    else
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for device/getStatus", __FUNCTION__);
+  }
+
+  /* What is left is adapters that went, and the devices on them. */
+  for (auto& gone : obj->btDeviceTokens_) {
+    obj->cancelCall(gone.second);
+    std::string prefix = gone.first + "/";
+    for (auto itr = obj->avrcpStatusTokens_.begin(); itr != obj->avrcpStatusTokens_.end();) {
+      if (itr->first.compare(0, prefix.size(), prefix) == 0) {
+        obj->cancelCall(itr->second);
+        obj->dropBTDevice(itr->first.substr(prefix.size()), gone.first);
+        itr = obj->avrcpStatusTokens_.erase(itr);
+      } else {
+        ++itr;
+      }
     }
+  }
+  obj->btDeviceTokens_.swap(adapters);
+  return true;
+}
+
+bool MediaControlService::onBTDeviceGetStatusCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
+    return true;
+
+  std::string adapterAddress = btString(payload, "adapterAddress");
+  if (!btBool(payload, "returnValue")) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s device/getStatus failed: %s", __FUNCTION__,
+                btString(payload, "errorText").c_str());
+    std::string key = keyOfCall(obj->btDeviceTokens_, message);
+    if (!key.empty())
+      obj->btDeviceTokens_.erase(key);
+    return true;
+  }
+  if (adapterAddress.empty())
+    adapterAddress = keyOfCall(obj->btDeviceTokens_, message);
+  if (adapterAddress.empty()) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s reply for no adapter we watch", __FUNCTION__);
+    return true;
+  }
+
+  /* Devices on this adapter that have AVRCP connected now. One
+   * avrcp/getStatus subscription each, opened when AVRCP appears and
+   * cancelled when it goes: this callback sees every device again on every
+   * change. An empty list is all of them gone. */
+  std::string prefix = adapterAddress + "/";
+  std::map<std::string, LSMessageToken> connected;
+  pbnjson::JValue devices = payload["devices"];
+  for (int i = 0; devices.isArray() && i < devices.arraySize(); i++) {
+    pbnjson::JValue profiles = devices[i]["connectedProfiles"];
+    bool avrcp = false;
+    for (int j = 0; profiles.isArray() && j < profiles.arraySize(); j++)
+      avrcp = avrcp || (profiles[j].isString() && profiles[j].asString() == "avrcp");
+    std::string address = btString(devices[i], "address");
+    if (!avrcp || address.empty())
+      continue;
+
+    std::string key = prefix + address;
+    if (connected.count(key))
+      continue;
+    auto held = obj->avrcpStatusTokens_.find(key);
+    if (held != obj->avrcpStatusTokens_.end()) {
+      connected.insert(*held);
+      obj->avrcpStatusTokens_.erase(held);
+      continue;
+    }
+
+    pbnjson::JValue request = pbnjson::Object();
+    request.put("adapterAddress", adapterAddress);
+    request.put("address", address);
+    request.put("subscribe", true);
+    PMLOG_INFO(CONST_MODULE_MCS, "%s avrcp/getStatus for %s", __FUNCTION__, key.c_str());
+    CLSError lserror;
+    LSMessageToken token = LSMESSAGE_TOKEN_INVALID;
+    if (LSCall(obj->lsHandle_, cstrBTAvrcpGetStatus.c_str(), request.stringify().c_str(),
+               &MediaControlService::onBTAvrcpGetStatusCb, obj, &token, &lserror))
+      connected[key] = token;
+    else
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for avrcp/getStatus", __FUNCTION__);
+  }
+
+  /* AVRCP has gone from these devices of this adapter: drop their
+   * subscriptions, or a reconnect would find the key held and the next one
+   * would leak, and forget the device. Other adapters' are left alone. */
+  for (auto itr = obj->avrcpStatusTokens_.begin(); itr != obj->avrcpStatusTokens_.end();) {
+    if (itr->first.compare(0, prefix.size(), prefix) != 0) {
+      ++itr;
+      continue;
+    }
+    obj->cancelCall(itr->second);
+    obj->dropBTDevice(itr->first.substr(prefix.size()), adapterAddress);
+    itr = obj->avrcpStatusTokens_.erase(itr);
+  }
+  obj->avrcpStatusTokens_.insert(connected.begin(), connected.end());
+  return true;
+}
+
+bool MediaControlService::onBTAvrcpGetStatusCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
+    return true;
+
+  std::string key = keyOfCall(obj->avrcpStatusTokens_, message);
+  if (!btBool(payload, "returnValue")) {
+    /* The subscription is over; so is what it told us about the device. */
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s avrcp/getStatus failed: %s", __FUNCTION__,
+                btString(payload, "errorText").c_str());
+    if (!key.empty()) {
+      std::string::size_type slash = key.find('/');
+      obj->dropBTDevice(key.substr(slash + 1), key.substr(0, slash));
+      obj->avrcpStatusTokens_.erase(key);
+    }
+    return true;
+  }
+
+  std::string address = btString(payload, "address");
+  std::string adapterAddress = btString(payload, "adapterAddress");
+  if (address.empty() || adapterAddress.empty()) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s reply without the device or adapter address", __FUNCTION__);
+    return true;
+  }
+  bool connected = btBool(payload, "connected");
+  PMLOG_INFO(CONST_MODULE_MCS, "%s device %s adapter %s AVRCP connected %d", __FUNCTION__,
+             address.c_str(), adapterAddress.c_str(), connected);
+
+  if (!connected) {
+    obj->dropBTDevice(address, adapterAddress);
+    return true;
+  }
+  if (obj->ptrMediaControlPrivate_->isDeviceRegistered(address, adapterAddress))
+    return true;
+
+  /* There is one display without FEATURE_DUAL_DISPLAY, and nothing tells
+   * which display an adapter belongs to with it: bluetooth goes to 0. */
+  BTDeviceInfo device(address, adapterAddress, 0);
+
+  pbnjson::JValue request = pbnjson::Object();
+  request.put("address", address);
+  request.put("adapterAddress", adapterAddress);
+  request.put("subscribe", true);
+  CLSError lserror;
+  if (!LSCall(obj->lsHandle_, cstrBTAvrcpReceivePassThroughCommand.c_str(),
+              request.stringify().c_str(), &MediaControlService::onBTAvrcpKeyEventsCb,
+              obj, &device.passThroughToken_, &lserror)) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for avrcp/receivePassThroughCommand", __FUNCTION__);
+    device.passThroughToken_ = LSMESSAGE_TOKEN_INVALID;
+  }
+  obj->ptrMediaControlPrivate_->setBTDeviceInfo(device);
+  return true;
+}
+
+bool MediaControlService::onBTAvrcpKeyEventsCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
+    return true;
+
+  if (!btBool(payload, "returnValue")) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s avrcp/receivePassThroughCommand failed: %s", __FUNCTION__,
+                btString(payload, "errorText").c_str());
+    return true;
+  }
+
+  std::string address = btString(payload, "address");
+  std::string adapterAddress = btString(payload, "adapterAddress");
+  std::string keyCode = btString(payload, "keyCode");
+  std::string keyStatus = btString(payload, "keyStatus");
+  PMLOG_INFO(CONST_MODULE_MCS, "%s address = %s, adapterAddress = %s, keyCode = %s, keyStatus = %s",
+             __FUNCTION__, address.c_str(), adapterAddress.c_str(), keyCode.c_str(), keyStatus.c_str());
+  if (keyStatus != "released" || keyCode.empty())
+    return true;
+  if (!obj->ptrMediaControlPrivate_->isDeviceRegistered(address, adapterAddress))
+    return true;
+
+  //post key event to the session last activated, on bluetooth's display (0)
+  std::string mediaId = obj->ptrMediaSessionMgr_->getCurrentActiveSession();
+  int displayIdForMedia = obj->ptrMediaSessionMgr_->getDisplayIdForMedia(mediaId);
+#if !defined(FEATURE_DUAL_DISPLAY)
+  displayIdForMedia = 0;
+#endif
+  PMLOG_INFO(CONST_MODULE_MCS, "%s mediaId for sending BT key event : %s", __FUNCTION__, mediaId.c_str());
+  if (mediaId.empty() || displayIdForMedia != 0)
+    return true;
+
+  pbnjson::JValue responseObj = pbnjson::Object();
+  responseObj.put("keyEvent", keyCode);
+  responseObj.put("mediaId", mediaId);
+  responseObj.put("returnValue", true);
+  responseObj.put("subscribed", true);
+  PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responseObj.stringify().c_str());
+  CLSError lserror;
+  if (!LSSubscriptionReply(obj->lsHandle_, "registerMediaSession", responseObj.stringify().c_str(), &lserror))
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionReply failed", __FUNCTION__);
+  return true;
+}
+
+void MediaControlService::notifyBTPlayStatus(const std::string& mediaId,
+                                             const std::string& playStatus) {
+  /*The below code will be removed once BT service will subscribe to MCS API
+    for recieving the mediaPlayback status information. This is a temporary fix, until BT
+    service implements the subscription call */
+
+  /* Only the session the headset's keys go to speaks for the phone: a
+   * second player in the background must not tell it "paused" while the
+   * first plays. */
+  if (mediaId != ptrMediaSessionMgr_->getCurrentActiveSession())
+    return;
+
+  /* AVRCP has stopped, playing, paused, fwd_seek, rev_seek and error.
+   * A session that has not started is stopped; buffering says nothing new. */
+  static const std::map<std::string, std::string> playStatusMap = {
+    {"PLAYSTATE_NONE", "stopped"},
+    {"PLAYSTATE_STOPPED", "stopped"},
+    {"PLAYSTATE_PAUSED", "paused"},
+    {"PLAYSTATE_PLAYING", "playing"},
+    {"PLAYSTATE_FAST_FORWARDING", "fwd_seek"},
+    {"PLAYSTATE_REWINDING", "rev_seek"},
+    {"PLAYSTATE_ERROR", "error"}
+  };
+  auto status = playStatusMap.find(playStatus);
+  if (status == playStatusMap.end())
+    return;
+
+  int displayIdForMedia = ptrMediaSessionMgr_->getDisplayIdForMedia(mediaId);
+#if !defined(FEATURE_DUAL_DISPLAY)
+  displayIdForMedia = 0;
+#endif
+  for (const auto& device : ptrMediaControlPrivate_->getBTDevices(displayIdForMedia)) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s adapterAddress = %s, address = %s status = %s", __FUNCTION__,
+               device.adapterAddress_.c_str(), device.deviceAddress_.c_str(), status->second.c_str());
+
+    pbnjson::JObject playStatusObj;
+    playStatusObj.put("duration", 0);
+    playStatusObj.put("position", 0);
+    playStatusObj.put("status", status->second);
+
+    pbnjson::JObject request;
+    request.put("adapterAddress", device.adapterAddress_);
+    request.put("address", device.deviceAddress_);
+    request.put("playbackStatus", playStatusObj);
 
     CLSError lserror;
-    MediaControlService *obj = static_cast<MediaControlService *>(ctx);
-    for (int i = 0; i < adapters.arraySize(); i++) {
-      std::string adapterName = adapters[i]["name"].asString();
-      std::string adapterAddress = adapters[i]["adapterAddress"].asString();
-      PMLOG_INFO(CONST_MODULE_MCS,"%s : adapterName : %s, adapterAddress : %s",
-                                   __FUNCTION__, adapterName.c_str(), adapterAddress.c_str());
-      deviceSetId = "RSE-L";
-      std::string payloadL = "{\"adapterAddress\":\"" + adapterAddress + "\",\"subscribe\":true}";
-      PMLOG_INFO(CONST_MODULE_MCS,"%s : payload = %s for first adapter",__FUNCTION__, payloadL.c_str());
-      if(obj) {
-        if (!LSCall(obj->lsHandle_,
-                    cstrBTDeviceGetStatus.c_str(),
-                    payloadL.c_str(),
-                    &onBTDeviceGetStatusCbWrapper,
-                    ctx, NULL, &lserror))
-          PMLOG_ERROR(CONST_MODULE_MCS,"%s : LSCall failed for BT device/getStatus", __FUNCTION__);
-      }
-#if defined(FEATURE_DUAL_DISPLAY)
-      deviceSetId = "RSE-R";
-      std::string payloadR = "{\"adapterAddress\":\"" + adapterAddress + "\",\"subscribe\":true}";
-      PMLOG_INFO(CONST_MODULE_MCS,"%s : payload = %s for second adapter",__FUNCTION__, payloadR.c_str());
-      if(obj) {
-        if (!LSCall(obj->lsHandle_,
-                    cstrBTDeviceGetStatus.c_str(),
-                    payloadR.c_str(),
-                    &MediaControlService::onBTDeviceGetStatusCb,
-                    ctx, NULL, &lserror))
-          PMLOG_ERROR(CONST_MODULE_MCS,"%s : LSCall failed for BT device/getStatus", __FUNCTION__);
-      }
-#endif
-    PMLOG_INFO(CONST_MODULE_MCS,"%s : adapterAddress = %s deviceSetId = %s [%d]",__FUNCTION__, adapterAddress.c_str(), deviceSetId.c_str(), __LINE__);
-    if (obj && !deviceSetId.empty() && !adapterAddress.empty())
-      obj->ptrMediaControlPrivate_->setBTAdapterInfo(deviceSetId, adapterAddress);
-    }
+    if (!LSCallOneReply(lsHandle_, cstrBTNotifyMediaPlayStatus.c_str(), request.stringify().c_str(),
+                        NULL, NULL, NULL, &lserror))
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed to avrcp/notifyMediaPlayStatus", __FUNCTION__);
   }
-  return true;
-}
-
-bool MediaControlService::onBTDeviceGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx) {
-  LSMessageJsonParser msg(message,SCHEMA_6(REQUIRED(subscribed, boolean), \
-  REQUIRED(adapterAddress, string),REQUIRED(returnValue, boolean),REQUIRED \
-  (devices,array),REQUIRED(errorCode, integer),REQUIRED(errorText, string)));
-
-  if (!msg.parse(__FUNCTION__)) {
-    PMLOG_ERROR(CONST_MODULE_MCS, "%s Parsing failed", __FUNCTION__);
-    return true;
-  }
-
-  bool returnValue = false;
-  msg.get("returnValue", returnValue);
-
-  if(returnValue) {
-    pbnjson::JValue deviceStatus = msg.get();
-    pbnjson::JValue devices = deviceStatus["devices"];
-    if (!devices.isArray()) {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s Empty device array", __FUNCTION__);
-      return true;
-    }
-    if (0 == devices.arraySize()) {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s devices arraySize 0", __FUNCTION__);
-      return true;
-    }
-    for(int i = 0; i < devices.arraySize(); i++) {
-      pbnjson::JValue connectedProfiles = devices[i]["connectedProfiles"];
-      if (0 == connectedProfiles.arraySize()) continue;
-      for (int j = 0; j < connectedProfiles.arraySize(); j++) {
-        std::string profile = connectedProfiles[j].asString();
-        PMLOG_INFO(CONST_MODULE_MCS, "%s profile : %s", __FUNCTION__, profile.c_str());
-        if ("avrcp" == profile ) {
-          std::string address = devices[i]["address"].asString();
-          std::string adapterAddress = devices[i]["adapterAddress"].asString();
-          std::string payload = "{\"adapterAddress\":\"" + adapterAddress + "\",\"address\":\"" + address + "\",\"subscribe\":true}";
-          PMLOG_INFO(CONST_MODULE_MCS, "%s payload : %s", __FUNCTION__, payload.c_str());
-          CLSError lserror;
-          MediaControlService *obj = static_cast<MediaControlService *>(ctx);
-          if(obj) {
-            if (!LSCall(obj->lsHandle_,
-                        cstrBTAvrcpGetStatus.c_str(),
-                        payload.c_str(),
-                        &MediaControlService::onBTAvrcpGetStatusCb,
-                        ctx, NULL, &lserror))
-              PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed to avrcp/getStatus", __FUNCTION__);
-            break;
-          }
-        }
-      }
-    }
-  }
-  return true;
-}
-
-bool MediaControlService::onBTAvrcpGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx) {
-  LSMessageJsonParser msg(message,SCHEMA_9(REQUIRED(subscribed, boolean), \
-  REQUIRED(adapterAddress, string),REQUIRED(returnValue, boolean),REQUIRED \
-  (connecting, boolean),REQUIRED(connected, boolean),REQUIRED(playing, boolean), \
-  REQUIRED(address, string),REQUIRED(errorCode, integer),REQUIRED(errorText, string)));
-
-  if (!msg.parse(__FUNCTION__)) {
-    PMLOG_ERROR(CONST_MODULE_MCS, "%s parsing failed", __FUNCTION__);
-    return true;
-  }
-
-  bool returnValue = false;
-  msg.get("returnValue", returnValue);
-  if (returnValue) {
-    std::string address;
-    msg.get("address", address);
-    if(nullptr == address.c_str()) {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s Device MAC address field not found", __FUNCTION__);
-      return true;
-    }
-    bool connected = false;
-    msg.get("connected", connected);
-    std::string adapterAddress;
-    msg.get("adapterAddress", adapterAddress);
-    PMLOG_INFO(CONST_MODULE_MCS, "%s Device MAC address %s Connection Status %d adapter address %s",\
-                                  __FUNCTION__, address.c_str(), connected, adapterAddress.c_str());
-    BTConnected_ = connected;
-    if (connected) {
-      //subscribe to bt key events
-      MediaControlService *obj = static_cast<MediaControlService *>(ctx);
-      if(obj) {
-
-        if(!(obj->ptrMediaControlPrivate_->isDeviceRegistered(address, adapterAddress))) {
-          int displayId = obj->ptrMediaControlPrivate_->getDisplayIdForBT(adapterAddress);
-#if !defined(FEATURE_DUAL_DISPLAY)
-          displayId = 0;
-#endif
-          BTDeviceInfo objDevInfo(address, adapterAddress, "", displayId);
-          PMLOG_ERROR(CONST_MODULE_MCS, "%s Device MAC address field not found", __FUNCTION__);
-
-          //save the details of BT device connected
-          obj->ptrMediaControlPrivate_->setBTDeviceInfo(objDevInfo);
-
-          std::string payload = "{\"address\":\"" + address + "\",\"adapterAddress\":\"" + adapterAddress + "\",\"subscribe\":true}";
-          PMLOG_INFO(CONST_MODULE_MCS, "%s payload : %s", __FUNCTION__, payload.c_str());
-          CLSError lserror;
-          if (!LSCall(obj->lsHandle_,
-                      cstrBTAvrcpReceivePassThroughCommand.c_str(),
-                      payload.c_str(),
-                      &MediaControlService::onBTAvrcpKeyEventsCb,
-                      ctx, NULL, &lserror))
-           PMLOG_ERROR(CONST_MODULE_MCS,"%s LSCall failed to avrcp/receivePassThroughCommand", __FUNCTION__);
-        }
-      }
-    }
-  }
-  return true;
-}
-
-bool MediaControlService::onGetSessionsInfoCb(LSHandle *lshandle, LSMessage *message, void *ctx) {
-  PMLOG_INFO(CONST_MODULE_MCS, "%s ", __FUNCTION__);
-  LSMessageJsonParser msg(message, SCHEMA_ANY);
-  if (!msg.parse(__func__))
-        return false;
-  bool returnValue = false;
-  msg.get("returnValue", returnValue);
-  if (returnValue) {
-    pbnjson::JValue payload = msg.get();
-    pbnjson::JValue sessionInfo = payload["sessions"];
-    if (!sessionInfo.isArray()) {
-      PMLOG_ERROR(CONST_MODULE_MCS,"%s LSCall failed to onGetSessionsInfoCb", __FUNCTION__);
-      return false;
-    } else {
-        MediaControlService *obj = static_cast<MediaControlService *>(ctx);
-        for (const auto& items : sessionInfo.items()) {
-          if (items.hasKey("deviceSetInfo")) {
-            int displayId;
-            std::string deviceSetId;
-            pbnjson::JValue deviceSetInfo = items["deviceSetInfo"];
-            displayId = deviceSetInfo["displayId"].asNumber<int>();
-            deviceSetId = deviceSetInfo["deviceSetId"].asString();
-            BTDeviceInfo btInfo("", "", std::move(deviceSetId), displayId);
-            obj->ptrMediaControlPrivate_->setSessionListInfo(btInfo);
-          }
-        }
-      }
-    }
-  return true;
-}
-
-bool MediaControlService::onBTAvrcpKeyEventsCb(LSHandle *lshandle, LSMessage *message, void *ctx) {
-  LSMessageJsonParser msg(message,SCHEMA_8(REQUIRED(subscribed, boolean), \
-  REQUIRED(adapterAddress, string),REQUIRED(returnValue, boolean),REQUIRED \
-  (keyCode, string),REQUIRED(keyStatus, string),REQUIRED(address, string), \
-  REQUIRED(errorCode, integer),REQUIRED(errorText, string)));
-
-  if (!msg.parse(__FUNCTION__)) {
-    PMLOG_ERROR(CONST_MODULE_MCS, "%s parsing failed", __FUNCTION__);
-    return true;
-  }
-
-  bool returnValue = false;
-  msg.get("returnValue", returnValue);
-
-  if(returnValue) {
-    std::string address;
-    msg.get("address", address);
-    std::string adapterAddress;
-    msg.get("adapterAddress", adapterAddress);
-    std::string keyCode;
-    msg.get("keyCode", keyCode);
-    std::string keyStatus;
-    msg.get("keyStatus",keyStatus);
-    PMLOG_INFO(CONST_MODULE_MCS, "%s address = %s, adapterAddress = %s, keyCode = %s, keyStatus = %s",
-                                  __FUNCTION__, address.c_str(), adapterAddress.c_str(), keyCode.c_str(), keyStatus.c_str());
-
-    if(keyStatus == "released") {
-      MediaControlService *obj = static_cast<MediaControlService *>(ctx);
-      if(obj) {
-        //get latest client from media session manager
-        int displayIdForBT = obj->ptrMediaControlPrivate_->getDisplayIdForBT(adapterAddress);
-        std::string mediaId = obj->ptrMediaControlPrivate_->getMediaId(address);
-        int displayIdForMedia = obj->ptrMediaSessionMgr_->getDisplayIdForMedia(mediaId);
-        //ToDo : Below platform check to be removed once multi intsnace support available in chromium for OSE
-#if !defined(FEATURE_DUAL_DISPLAY)
-        displayIdForBT = displayIdForMedia = 0;
-#endif
-        PMLOG_INFO(CONST_MODULE_MCS, "%s mediaId for sending BT key event : %s", __FUNCTION__, mediaId.c_str());
-        PMLOG_INFO(CONST_MODULE_MCS, "%s displayIdForBT = %d displayIdForMedia = %d", __FUNCTION__, displayIdForBT, displayIdForMedia);
-        //post key event to application
-        if(!mediaId.empty() && (displayIdForBT == displayIdForMedia)) {
-          pbnjson::JValue responseObj = pbnjson::Object();
-          responseObj.put("keyEvent", keyCode);
-          responseObj.put("mediaId", mediaId);
-          responseObj.put("returnValue", true);
-          responseObj.put("subscribed", true);
-          PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responseObj.stringify().c_str());
-          CLSError lserror;
-          if (!LSSubscriptionReply(obj->lsHandle_,"registerMediaSession" , responseObj.stringify().c_str(), &lserror))
-            PMLOG_ERROR(CONST_MODULE_MCS,"%s LSSubscriptionReply failed", __FUNCTION__);
-        }
-      }
-    }
-  }
-  return true;
 }
 
 bool MediaControlService::registerMediaSession(LSMessage& message) {
@@ -1135,60 +1224,7 @@ bool MediaControlService::setMediaPlayStatus(LSMessage& message) {
     return true;
   }
 
-  PMLOG_INFO(CONST_MODULE_MCS, "%s BTConnected_ value  = [%d]", __FUNCTION__, BTConnected_);
-  /*The below code under if() condition will be removed once BT service will subscribe to MCS API
-    for recieving the mediaPlayback status information. This is a temporary fix, until BT
-    service implements the subscription call */
-  if (BTConnected_) {
-    std::string sendPlaybackStatus = "error";
-
-    std::map<std::string, std::string> playStatusMap = {
-      {"PLAYSTATE_STOPPED", "stopped"},
-      {"PLAYSTATE_PAUSED", "paused"},
-      {"PLAYSTATE_PLAYING", "playing"},
-      {"PLAYSTATE_FAST_FORWARDING", "fwd_seek"},
-      {"PLAYSTATE_REWINDING", "rev_seek"},
-      {"PLAYSTATE_ERROR", "error"}
-    };
-
-    auto it = playStatusMap.find(playStatus);
-    if (it != playStatusMap.end()) {
-      sendPlaybackStatus = it->second;
-    } else {
-      PMLOG_INFO(CONST_MODULE_MCS, "%s Invalid PlaybackStatus", __FUNCTION__);
-    }
-
-    int displayIdForMedia = ptrMediaSessionMgr_->getDisplayIdForMedia(mediaId);
-#if !defined(FEATURE_DUAL_DISPLAY)
-    displayIdForMedia = 0;
-#endif
-    BTDeviceInfo objDevInfo;
-    if (ptrMediaControlPrivate_->getBTDeviceInfo(displayIdForMedia, &objDevInfo)) {
-      std::string adapterAddress;
-      std::string address;
-      adapterAddress = objDevInfo.adapterAddress_;
-      address = objDevInfo.deviceAddress_;
-      CLSError lserror;
-      PMLOG_INFO(CONST_MODULE_MCS, "%s displayId = %d adapterAddress = %s, address = %s sendPlaybackStatus = %s",
-                                 __FUNCTION__,displayIdForMedia, adapterAddress.c_str(), address.c_str(), sendPlaybackStatus.c_str());
-
-      pbnjson::JObject playStatusObj;
-      playStatusObj.put("duration",0);
-      playStatusObj.put("position",0);
-      playStatusObj.put("status",sendPlaybackStatus);
-
-      pbnjson::JObject responseObj;
-      responseObj.put("adapterAddress", adapterAddress);
-      responseObj.put("address", address);
-      responseObj.put("playbackStatus", playStatusObj);
-      std::string payloadData;
-      payloadData = responseObj.stringify();
-
-      if (!LSCallOneReply(lsHandle_, cstrBTNotifyMediaPlayStatus.c_str(), payloadData.c_str(), NULL, NULL, NULL, &lserror)) {
-        PMLOG_ERROR(CONST_MODULE_MCS,"%s LSCall failed to avrcp/notifyMediaPlayStatus", __FUNCTION__);
-      }
-    }
-  }
+  notifyBTPlayStatus(mediaId, playStatus);
 
   if (ptrMediaControlPrivate_->playStatus_) {
     /*Get display ID from media ID*/

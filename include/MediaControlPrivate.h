@@ -21,6 +21,8 @@
  (File Inclusions)
  ------------------------------------------------------------------------------*/
 #include <map>
+#include <string>
+#include <vector>
 
 #include "MediaControlTypes.h"
 
@@ -35,18 +37,18 @@ public:
   bool enableMediaAction_;
   static MediaControlPrivate &getInstance();
 
+  /* Bluetooth devices with AVRCP connected, keyed by
+   * "<adapter address>/<device address>". */
   void setBTDeviceInfo(const BTDeviceInfo& objDevInfo);
-  bool getBTDeviceInfo(const int& displayId, BTDeviceInfo *objDevInfo);
-  bool isDeviceRegistered(const std::string& address, const std::string& adapterAddress);
-  std::string getMediaId(const std::string& deviceAddress);
-  void setSessionListInfo(const BTDeviceInfo& btInfo);
-  void setBTAdapterInfo(const std::string& deviceSetId, const std::string& adapterAddress);
-  int getDisplayIdForBT(const std::string& adapterAddress);
+  bool removeBTDevice(const std::string& address, const std::string& adapterAddress,
+                      BTDeviceInfo *removed);
+  std::vector<BTDeviceInfo> getBTDevices(int displayId) const;
+  std::vector<BTDeviceInfo> takeBTDevices();
+  bool isDeviceRegistered(const std::string& address, const std::string& adapterAddress) const;
 
 private:
   MediaControlPrivate();
   std::map<std::string, BTDeviceInfo> mapDeviceInfo_;
-  std::vector<BTDeviceInfo> btAdapterInfo_;
 };
 
-#endif /*MEDIA_CONTROL_SERVICE_H_*/
+#endif /*MEDIA_CONTROL_PRIVATE_H_*/

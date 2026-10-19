@@ -24,21 +24,23 @@
 #include <vector>
 #include "MediaControlTypes.h"
 #include "RequestReceiver.h"
-#include <luna-service2/lunaservice.hpp>
+#include <luna-service2/lunaservice.h>
 #include "FileManager.h"
 
 class MediaSessionManager
 {
 private:
-  MediaSessionManager();
-  ~MediaSessionManager();
   std::map<std::string, mediaSession> mapMediaSessionInfo_;
   RequestReceiver objRequestRcvr_;
   LSHandle *lshandle_ = nullptr;
   FileManager *fileManager;
 
 public:
-  static MediaSessionManager &getInstance();
+  MediaSessionManager();
+  ~MediaSessionManager();
+  MediaSessionManager(const MediaSessionManager&) = delete;
+  MediaSessionManager& operator=(const MediaSessionManager&) = delete;
+
   int addMediaSession (const std::string& mediaId,
                        const std::string& appId);
   int activateMediaSession (const std::string& mediaId);

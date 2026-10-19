@@ -45,9 +45,16 @@ pkg_check_modules(GLIB2 REQUIRED glib-2.0)
 include_directories(${GLIB2_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${GLIB2_CFLAGS_OTHER})
 
+pkg_check_modules(LS2 REQUIRED luna-service2>=3)
+include_directories(${LS2_INCLUDE_DIRS})
+webos_add_compiler_flags(ALL ${LS2_CFLAGS_OTHER})
+
+if(MCS_MANUAL_TEST_CLIENTS)
+# The manual test clients use the C++ wrapper; the service does not.
 pkg_check_modules(LS2++ REQUIRED luna-service2++>=3)
 include_directories(${LS2++_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${LS2++_CFLAGS})
+endif()
 
 pkg_check_modules(PMLOGLIB REQUIRED PmLogLib)
 include_directories(${PMLOGLIB_INCLUDE_DIRS})
@@ -82,6 +89,7 @@ if(MCS_MANUAL_TEST_CLIENTS)
 add_subdirectory(${CMAKE_SOURCE_DIR}/test/)
 endif()
 
+# Everything but main(), so the tests can link the service's own objects.
 set(SRC_LIST
     ${CMAKE_SOURCE_DIR}/src/MediaControlService.cpp
     ${CMAKE_SOURCE_DIR}/src/MediaSessionManager.cpp
@@ -95,8 +103,11 @@ set(SRC_LIST
     ${CMAKE_SOURCE_DIR}/src/fileManager/FileSystem.cpp
    )
 
+add_library(mcs-core OBJECT ${SRC_LIST})
+
 add_executable(${PROJECT_NAME}
-               ${SRC_LIST})
+               $<TARGET_OBJECTS:mcs-core>
+               ${CMAKE_SOURCE_DIR}/src/main.cpp)
 # -rdynamic, so a backtrace names the daemon's own functions. It used to be
 # passed as a compiler flag, where it did nothing.
 set_property(TARGET ${PROJECT_NAME} PROPERTY ENABLE_EXPORTS ON)
@@ -104,7 +115,7 @@ set_property(TARGET ${PROJECT_NAME} PROPERTY ENABLE_EXPORTS ON)
 target_link_libraries(${PROJECT_NAME}
                       ${GLIB2_LDFLAGS}
                       ${PBNJSON_CPP_LDFLAGS}
-                      ${LS2++_LDFLAGS}
+                      ${LS2_LDFLAGS}
                       ${PMLOGLIB_LDFLAGS}
                       ${CURL_LDFLAGS})
 

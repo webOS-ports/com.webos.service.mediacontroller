@@ -22,11 +22,6 @@ MediaControlPrivate::MediaControlPrivate() :
   mediaMetaData_(false), coverArt_(false), enableMediaAction_(false), mapDeviceInfo_() {
 }
 
-MediaControlPrivate& MediaControlPrivate::getInstance() {
-  static MediaControlPrivate objMediaCtrlPrivate;
-  return objMediaCtrlPrivate;
-}
-
 static std::string deviceKey(const std::string& address, const std::string& adapterAddress) {
   return adapterAddress + "/" + address;
 }

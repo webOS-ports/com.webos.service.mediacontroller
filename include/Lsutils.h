@@ -24,7 +24,7 @@
 #include <cstring>
 #include <iostream>
 #include <pbnjson.hpp>
-#include <luna-service2/lunaservice.hpp>
+#include <luna-service2/lunaservice.h>
 
 #define SYSTEM_PARAMETERS "\"$activity\":{\"type\":\"object\",\"optional\":true}"
 
@@ -51,17 +51,27 @@
 #define OPTIONAL(name, type) "\"" #name "\":{\"type\":\"" #type "\",\"optional\":true}"
 
 /*
-* Small wrapper around LSError. User is responsible for calling Print or Free after the * error has been set.
-*/
+ * LSError that frees itself: luna-service2 allocates the message of an error
+ * it reports, and every failure path used to leak it.
+ */
 struct CLSError : public LSError
 {
   CLSError()
   {
     LSErrorInit(this);
   }
-  void Free()
+  ~CLSError()
   {
-    LSErrorFree(this);
+    if (LSErrorIsSet(this))
+      LSErrorFree(this);
+  }
+  CLSError(const CLSError&) = delete;
+  CLSError& operator=(const CLSError&) = delete;
+
+  //! The message, or "" when none was set.
+  const char *text() const
+  {
+    return message ? message : "";
   }
 };
 

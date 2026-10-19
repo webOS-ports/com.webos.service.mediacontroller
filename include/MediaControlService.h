@@ -20,8 +20,9 @@
 /*-----------------------------------------------------------------------------
  (File Inclusions)
  ------------------------------------------------------------------------------*/
-#include <luna-service2/lunaservice.hpp>
+#include <luna-service2/lunaservice.h>
 #include <glib.h>
+#include <pbnjson.hpp>
 
 #include <map>
 #include <string>
@@ -29,19 +30,24 @@
 #include "MediaSessionManager.h"
 #include "MediaControlPrivate.h"
 
-class MediaControlService : public LS::Handle
+/*
+ * The service. start() registers it on the bus and attaches it to the main
+ * loop given; running the loop is the caller's. The destructor, or stop(),
+ * takes it off the bus again.
+ */
+class MediaControlService
 {
-private:
-  using mainloop = std::unique_ptr<GMainLoop, void (*)(GMainLoop *)>;
-  mainloop main_loop_ptr_ = {g_main_loop_new(nullptr, false), g_main_loop_unref};
-
 public:
   MediaControlService();
+  ~MediaControlService();
 
   MediaControlService(MediaControlService const &) = delete;
   MediaControlService(MediaControlService &&) = delete;
   MediaControlService &operator=(MediaControlService const &) = delete;
   MediaControlService &operator=(MediaControlService &&) = delete;
+
+  bool start(GMainLoop *loop);
+  void stop();
 
   bool registerMediaSession(LSMessage &);
   bool unregisterMediaSession(LSMessage &);
@@ -61,6 +67,9 @@ public:
   bool setMediaCoverArt (LSMessage &);
   bool receiveMediaPlaybackInfo (LSMessage &);
   bool injectMediaKeyEvent (LSMessage &);
+#if USE_TEST_METHOD
+  bool testKeyEvent(LSMessage &);
+#endif
   static bool onBTServerStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTAdapterQueryCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTDeviceGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
@@ -74,13 +83,13 @@ private:
   void dropBTDevice(const std::string& address, const std::string& adapterAddress);
   void cancelCall(LSMessageToken& token);
   void notifyBTPlayStatus(const std::string& mediaId, const std::string& playStatus);
-#if USE_TEST_METHOD
-  bool testKeyEvent(LSMessage &);
-#endif
 
-  LSHandle *lsHandle_;
-  MediaSessionManager *ptrMediaSessionMgr_;
-  MediaControlPrivate *ptrMediaControlPrivate_;
+  LSHandle *lsHandle_ = nullptr;
+  MediaSessionManager mediaSessionMgr_;
+  MediaControlPrivate mediaControlPrivate_;
+
+  /* com.webos.service.bus/signal/registerServerStatus for bluetooth2. */
+  LSMessageToken btServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;
 
   /* What is held open on bluetooth2, so that each is opened once and
    * cancelled when what it watches goes: device/getStatus repeats every

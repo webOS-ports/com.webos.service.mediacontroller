@@ -32,11 +32,6 @@ MediaSessionManager::~MediaSessionManager() {
     delete fileManager;
 }
 
-MediaSessionManager& MediaSessionManager::getInstance() {
-  static MediaSessionManager objMediaSessionMgr;
-  return objMediaSessionMgr;
-}
-
 int MediaSessionManager::addMediaSession (const std::string& mediaId,
                                            const std::string& appId) {
   PMLOG_INFO(CONST_MODULE_MSM, "%s mediaId : %s , appId : %s", __FUNCTION__, mediaId.c_str(), appId.c_str());

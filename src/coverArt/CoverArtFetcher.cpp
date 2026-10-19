@@ -25,6 +25,7 @@
 #include <unistd.h>
 
 #include <cctype>
+#include <climits>
 #include <chrono>
 #include <cstring>
 
@@ -249,11 +250,11 @@ CoverArtFetcher::CoverArtFetcher(std::string dir, Done done)
 
   // The cache is created by systemd (CacheDirectory=); make it if it is not.
   if (mkdir(dir_.c_str(), 0700) != 0 && errno != EEXIST)
-    PMLOG_ERROR(CONST_MODULE_MCD, "%s cannot create %s: %s", __FUNCTION__, dir_.c_str(), strerror(errno));
+    PMLOG_ERROR(CONST_MODULE_MCD, "%s cannot create %s: %s", __FUNCTION__, dir_.c_str(), g_strerror(errno));
   int fd = open(dir_.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
   if (fd < 0) {
     PMLOG_ERROR(CONST_MODULE_MCD, "%s %s is not a directory to use: %s", __FUNCTION__, dir_.c_str(),
-                strerror(errno));
+                g_strerror(errno));
   } else {
     emptyDirectory(fd);
     close(fd);
@@ -286,8 +287,8 @@ unsigned CoverArtFetcher::fetch(const std::string &url) {
                 jobs_.size(), redact(url).c_str());
     return 0;
   }
-  if (++lastId_ == 0)
-    ++lastId_;
+  // ids go round, skipping 0, which is "refused"
+  lastId_ = lastId_ == UINT_MAX ? 1 : lastId_ + 1;
   jobs_.push_back({lastId_, url});
   wake_.notify_one();
   return lastId_;
@@ -364,7 +365,7 @@ bool CoverArtFetcher::attempt(const std::string &url, const std::string &target,
   name.push_back('\0');
   int fd = mkostemp(name.data(), O_CLOEXEC);
   if (fd < 0) {
-    PMLOG_ERROR(CONST_MODULE_MCD, "%s no temporary file in %s: %s", __FUNCTION__, dir_.c_str(), strerror(errno));
+    PMLOG_ERROR(CONST_MODULE_MCD, "%s no temporary file in %s: %s", __FUNCTION__, dir_.c_str(), g_strerror(errno));
     return false;
   }
 
@@ -409,7 +410,7 @@ bool CoverArtFetcher::attempt(const std::string &url, const std::string &target,
   if (close(fd) != 0)
     ok = false;
   if (ok && rename(name.data(), target.c_str()) != 0) {
-    PMLOG_ERROR(CONST_MODULE_MCD, "%s rename failed: %s", __FUNCTION__, strerror(errno));
+    PMLOG_ERROR(CONST_MODULE_MCD, "%s rename failed: %s", __FUNCTION__, g_strerror(errno));
     ok = false;
   }
   if (!ok) {

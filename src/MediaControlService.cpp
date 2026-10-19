@@ -578,6 +578,17 @@ static std::string muteStatusOf(const std::string &muteStatus) {
   return std::string();
 }
 
+/* The display a call is for: the one it names with FEATURE_DUAL_DISPLAY,
+ * else the only one there is. */
+static int displayOf(pbnjson::JValue &payload) {
+#if defined(FEATURE_DUAL_DISPLAY)
+  return payload["displayId"].asNumber<int>();
+#else
+  (void)payload;
+  return 0;
+#endif
+}
+
 /* A mediaId the caller gave, from a payload validated as having one. */
 static std::string mediaIdOf(LSMessageJsonParser &msg) {
   std::string mediaId;
@@ -933,10 +944,7 @@ bool MediaControlService::getMediaCoverArtPath(LSMessage& message) {
     return replyError(message, MCS_ERROR_PARSING_FAILED);
 
   pbnjson::JValue payload = msg.get();
-  int displayId = payload["displayId"].asNumber<int>();
-#if !defined(FEATURE_DUAL_DISPLAY)
-  displayId = 0;
-#endif
+  int displayId = displayOf(payload);
   pbnjson::JValue srcs = payload["src"];
   if (srcs.arraySize() <= 0 || static_cast<size_t>(srcs.arraySize()) > MAX_COVER_ART_SOURCES)
     return replyError(message, MCS_ERROR_PARSING_FAILED);
@@ -1193,10 +1201,7 @@ bool MediaControlService::injectMediaKeyEvent(LSMessage &message) {
     return replyError(message, MCS_ERROR_PARSING_FAILED);
 
   pbnjson::JValue payload = msg.get();
-  int displayId = payload["displayId"].asNumber<int>();
-#if !defined(FEATURE_DUAL_DISPLAY)
-  displayId = 0;
-#endif
+  int displayId = displayOf(payload);
   std::string keyEvent;
   msg.get("keyEvent", keyEvent);
   PMLOG_INFO(CONST_MODULE_MCS, "%s displayId : %d keyEvent : %s", __FUNCTION__,

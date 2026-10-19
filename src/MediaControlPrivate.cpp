@@ -54,6 +54,7 @@ std::vector<BTDeviceInfo> MediaControlPrivate::getBTDevices(int displayId) const
 
 std::vector<BTDeviceInfo> MediaControlPrivate::takeBTDevices() {
   std::vector<BTDeviceInfo> devices;
+  devices.reserve(mapDeviceInfo_.size());
   for (auto& itr : mapDeviceInfo_)
     devices.push_back(std::move(itr.second));
   mapDeviceInfo_.clear();

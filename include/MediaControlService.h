@@ -30,6 +30,11 @@
 #include "MediaSessionManager.h"
 #include "MediaControlPrivate.h"
 
+#if MCS_COVER_ART
+#include <memory>
+#include "CoverArtFetcher.h"
+#endif
+
 /*
  * The service. start() registers it on the bus and attaches it to the main
  * loop given; running the loop is the caller's. The destructor, or stop(),
@@ -58,7 +63,11 @@ public:
   bool getMediaSessionInfo(LSMessage &);
   bool getMediaSessionId(LSMessage &);
   bool getActiveMediaSessions(LSMessage &);
+#if MCS_COVER_ART
+  //! At most this many sources in one getMediaCoverArtPath call.
+  static constexpr size_t MAX_COVER_ART_SOURCES = 8;
   bool getMediaCoverArtPath(LSMessage &);
+#endif
   bool setSupportedActions(LSMessage &);
   bool setMediaMetaData(LSMessage &);
   bool setMediaPlayStatus(LSMessage &);
@@ -96,6 +105,14 @@ private:
   /* The registerMediaSession call of each session that subscribed, held
    * (LSMessageRef) until the session ends. */
   std::map<std::string, LSMessage *> sessionClients_;
+
+#if MCS_COVER_ART
+  void onCoverArtFetched(const CoverArtFetcher::Result &result);
+  std::unique_ptr<CoverArtFetcher> coverArt_;
+  /* The getMediaCoverArtPath call waiting for each fetch, held until its
+   * result is sent or the caller goes. */
+  std::map<unsigned, LSMessage *> coverArtCallers_;
+#endif
 
   /* com.webos.service.bus/signal/registerServerStatus for bluetooth2. */
   LSMessageToken btServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;

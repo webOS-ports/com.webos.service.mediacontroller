@@ -25,6 +25,12 @@ project(com.webos.service.mediacontroller CXX)
 # test/, along with a test service holding oem trust and "*" outbound.
 option(MCS_TEST_METHODS "Register the testKeyEvent bus method" OFF)
 option(MCS_MANUAL_TEST_CLIENTS "Build and install the manual test clients in test/" OFF)
+# getMediaCoverArtPath: fetching cover art over http(s) into a cache. Off,
+# as nothing on LuneOS calls it and a media session service has no need to
+# make network requests on a caller's say-so.
+option(MCS_COVER_ART "Build getMediaCoverArtPath, the cover art fetcher (needs libcurl)" OFF)
+set(MCS_COVER_ART_DIR "/var/cache/mediacontroller" CACHE STRING
+    "The cover art cache: systemd's CacheDirectory=mediacontroller")
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,9 +43,14 @@ webos_component(1 0 0)
 
 include(FindPkgConfig)
 
-pkg_check_modules(CURL REQUIRED libcurl)
+if(MCS_COVER_ART)
+pkg_check_modules(CURL REQUIRED libcurl>=7.85)
 include_directories(${CURL_INCLUDE_DIRS})
 webos_add_compiler_flags(ALL ${CURL_CFLAGS_OTHER})
+add_definitions(-DMCS_COVER_ART=1 -DMCS_COVER_ART_DIR="${MCS_COVER_ART_DIR}")
+else()
+add_definitions(-DMCS_COVER_ART=0)
+endif()
 
 pkg_check_modules(GLIB2 REQUIRED glib-2.0)
 include_directories(${GLIB2_INCLUDE_DIRS})
@@ -82,8 +93,7 @@ include_directories(${CMAKE_SOURCE_DIR}/files/systemd/)
 
 include_directories(${CMAKE_SOURCE_DIR}/include/)
 
-include_directories(${CMAKE_SOURCE_DIR}/src/fileManager/)
-include_directories(${CMAKE_SOURCE_DIR}/src/fileDownloader/)
+include_directories(${CMAKE_SOURCE_DIR}/src/coverArt/)
 
 if(MCS_MANUAL_TEST_CLIENTS)
 add_subdirectory(${CMAKE_SOURCE_DIR}/test/)
@@ -96,12 +106,10 @@ set(SRC_LIST
     ${CMAKE_SOURCE_DIR}/src/MediaControlPrivate.cpp
     ${CMAKE_SOURCE_DIR}/src/RequestReceiver.cpp
     ${CMAKE_SOURCE_DIR}/src/Lsutils.cpp
-    ${CMAKE_SOURCE_DIR}/src/fileDownloader/Downloader.cpp
-    ${CMAKE_SOURCE_DIR}/src/fileDownloader/DownloaderFactory.cpp
-    ${CMAKE_SOURCE_DIR}/src/fileManager/FileManager.cpp
-    ${CMAKE_SOURCE_DIR}/src/fileManager/CacheManager.cpp
-    ${CMAKE_SOURCE_DIR}/src/fileManager/FileSystem.cpp
    )
+if(MCS_COVER_ART)
+list(APPEND SRC_LIST ${CMAKE_SOURCE_DIR}/src/coverArt/CoverArtFetcher.cpp)
+endif()
 
 add_library(mcs-core OBJECT ${SRC_LIST})
 
@@ -117,7 +125,8 @@ target_link_libraries(${PROJECT_NAME}
                       ${PBNJSON_CPP_LDFLAGS}
                       ${LS2_LDFLAGS}
                       ${PMLOGLIB_LDFLAGS}
-                      ${CURL_LDFLAGS})
+                      ${CURL_LDFLAGS}
+                      pthread)
 
 if(MCS_MANUAL_TEST_CLIENTS)
 #MediaControllerServiceTest project exe

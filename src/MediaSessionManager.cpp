@@ -17,19 +17,12 @@
 /*-----------------------------------------------------------------------------*/
 #include "MediaSessionManager.h"
 #include "MediaControlTypes.h"
-#include "thread"
-#include <unistd.h>
-#include "Lsutils.h"
-#include "Utils.h"
 
 MediaSessionManager::MediaSessionManager() :
   mapMediaSessionInfo_() {
-  fileManager = new FileManager;
 }
 
 MediaSessionManager::~MediaSessionManager() {
-  if(fileManager != nullptr)
-    delete fileManager;
 }
 
 int MediaSessionManager::addMediaSession (const std::string& mediaId,
@@ -327,51 +320,4 @@ std::string MediaSessionManager::getMediaIdFromDisplayId(int displayId) {
       return mediaId;
   }
   return CSTR_EMPTY;
-}
-
-bool MediaSessionManager::download(const std::string& url) {
-  PMLOG_INFO(CONST_MODULE_MSM, "%s CoverArt Uri : %s", __FUNCTION__, url.c_str());
-
-  pbnjson::JValue responsePayload = pbnjson::Object();
-  responsePayload.put("src", url);
-
-  try {
-    std::string downloadedFilePath = fileManager->getURI(url, COVERART_FILE_PATH);
-    PMLOG_INFO(CONST_MODULE_MSM, "%s Download completed at %s", __FUNCTION__, downloadedFilePath.c_str());
-
-    responsePayload.put("returnValue", true);
-    responsePayload.put("subscribed", true);
-    responsePayload.put("srcPath", downloadedFilePath);
-  } catch (...) {
-    PMLOG_INFO(CONST_MODULE_MSM, "%s Download error", __FUNCTION__);
-    responsePayload.put("returnValue", false);
-    responsePayload.put("subscribed", true);
-    responsePayload.put("srcPath", "");
-  }
-
-  CLSError lserror;
-  if (!LSSubscriptionReply(lshandle_,"getMediaCoverArtPath" , responsePayload.stringify().c_str(), &lserror)){
-      PMLOG_ERROR(CONST_MODULE_MSM,"%s LSSubscriptionReply failed for getMediaCoverArtPath", __FUNCTION__);
-      return true;
-  }
-
-  return true;
-}
-
-int MediaSessionManager::coverArtDownload(const std::string& mediaId, const std::vector<std::string> uris) {
-  PMLOG_INFO(CONST_MODULE_MSM, "%s mediaId : %s", __FUNCTION__, mediaId.c_str());
-
-  const auto& itr = mapMediaSessionInfo_.find(mediaId);
-  if(itr == mapMediaSessionInfo_.end()) {
-    PMLOG_ERROR(CONST_MODULE_MSM, "%s MediaId doesnt exists", __FUNCTION__);
-    return MCS_ERROR_NO_ACTIVE_SESSION;
-  }
-
-  for(auto &uri : uris)
-  {
-    std::thread tidDownload = std::thread(&MediaSessionManager::download, this, uri);
-    tidDownload.detach();
-  }
-
-  return MCS_ERROR_NO_ERROR;
 }

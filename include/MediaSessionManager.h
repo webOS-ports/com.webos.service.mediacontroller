@@ -24,16 +24,12 @@
 #include <vector>
 #include "MediaControlTypes.h"
 #include "RequestReceiver.h"
-#include <luna-service2/lunaservice.h>
-#include "FileManager.h"
 
 class MediaSessionManager
 {
 private:
   std::map<std::string, mediaSession> mapMediaSessionInfo_;
   RequestReceiver objRequestRcvr_;
-  LSHandle *lshandle_ = nullptr;
-  FileManager *fileManager;
 
 public:
   MediaSessionManager();
@@ -81,9 +77,6 @@ public:
   //! The display an app is on: with FEATURE_DUAL_DISPLAY the last
   //! character of its appId, when that is a digit; else 0.
   static int displayIdFromAppId(const std::string& appId);
-  int coverArtDownload(const std::string& mediaId, const std::vector<std::string> uri);
-  bool download(const std::string& uri);
-  void setLSHandle(LSHandle *lshandle) { lshandle_ = lshandle;};
 };
 
 #endif /*MEDIA_SESSION_MANAGER_H_*/

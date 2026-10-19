@@ -23,7 +23,6 @@
 
 #include <string>
 #include <iostream>
-#include "Utils.h"
 
 const std::string cstrMediaControlService = "com.webos.service.mediacontroller";
 const std::string cstrBTAdapterGetStatus = "luna://com.webos.service.bluetooth2/adapter/getStatus";
@@ -32,7 +31,6 @@ const std::string cstrBTAvrcpGetStatus = "luna://com.webos.service.bluetooth2/av
 const std::string cstrBTAvrcpReceivePassThroughCommand = "luna://com.webos.service.bluetooth2/avrcp/receivePassThroughCommand";
 const std::string cstrSubscribe = "{\"subscribe\":true}";
 const std::string cstrBTNotifyMediaPlayStatus = "luna://com.webos.service.bluetooth2/avrcp/notifyMediaPlayStatus";
-const std::string MEDIA_SESSION_FOLDER = "/media/internal/.media-session";
 
 const short dispId = 0;
 
@@ -60,7 +58,9 @@ static LSMethod mediaControlMethods[] = {
   MCS_METHOD(getMediaSessionInfo),
   MCS_METHOD(getMediaSessionId),
   MCS_METHOD(getActiveMediaSessions),
+#if MCS_COVER_ART
   MCS_METHOD(getMediaCoverArtPath),
+#endif
   MCS_METHOD(setMediaMetaData),
   MCS_METHOD(setMediaPlayStatus),
   MCS_METHOD(setMediaMuteStatus),
@@ -116,25 +116,24 @@ bool MediaControlService::start(GMainLoop *loop) {
     return false;
   }
 
-  int rev = directoryExists(MEDIA_SESSION_FOLDER);
-  if(!rev) {
-    // Create the directory with 755 permissions
-    if (mkdir(MEDIA_SESSION_FOLDER.c_str(), 0755) == -1) {
-      PMLOG_ERROR(CONST_MODULE_MCS,"%s failed to create %s", __FUNCTION__, MEDIA_SESSION_FOLDER.c_str());
-    }
-  } else {
-    if (deleteAllFilesInDirectory(MEDIA_SESSION_FOLDER)) {
-      PMLOG_INFO(CONST_MODULE_MCS,"%s All files deleted successfully.", __FUNCTION__);
-    } else {
-      PMLOG_INFO(CONST_MODULE_MCS,"%s Failed to delete all files.", __FUNCTION__);
-    }
-  }
+#if MCS_COVER_ART
+  coverArt_ = std::make_unique<CoverArtFetcher>(MCS_COVER_ART_DIR,
+      [this](const CoverArtFetcher::Result &result) { onCoverArtFetched(result); });
+#endif
   return true;
 }
 
 void MediaControlService::stop() {
   if (!lsHandle_)
     return;
+
+#if MCS_COVER_ART
+  /* No result may come back for a caller that is no longer held. */
+  coverArt_.reset();
+  for (auto& caller : coverArtCallers_)
+    LSMessageUnref(caller.second);
+  coverArtCallers_.clear();
+#endif
 
   /* The sessions' calls are held until the handle goes; its cancel
    * function is not called for them then. */
@@ -709,6 +708,16 @@ bool MediaControlService::onSubscriptionCancel(LSHandle *, LSMessage *message, v
   MediaControlService *obj = static_cast<MediaControlService *>(ctx);
   if (!obj)
     return true;
+#if MCS_COVER_ART
+  for (auto caller = obj->coverArtCallers_.begin(); caller != obj->coverArtCallers_.end();) {
+    if (caller->second == message) {
+      LSMessageUnref(caller->second);
+      caller = obj->coverArtCallers_.erase(caller);
+    } else {
+      ++caller;
+    }
+  }
+#endif
   for (const auto& client : obj->sessionClients_) {
     if (client.second != message)
       continue;
@@ -918,106 +927,85 @@ bool MediaControlService::getActiveMediaSessions(LSMessage& message) {
   return true;
 }
 
+#if MCS_COVER_ART
 bool MediaControlService::getMediaCoverArtPath(LSMessage& message) {
-  PMLOG_INFO(CONST_MODULE_MCS, "%s IN", __FUNCTION__);
-
   LSMessageJsonParser msg(&message,STRICT_SCHEMA(PROPS_3(REQUIRED(displayId, integer), \
     OPTIONAL(subscribe, boolean),REQUIRED(src, array)) REQUIRED_2(displayId, src)));
-
-  int errorCode = MCS_ERROR_NO_ERROR;
-  std::string errorText;
-  std::string response;
-
-  if (!msg.parse(__FUNCTION__)) {
+  if (!msg.parse(__FUNCTION__))
     return replyError(message, MCS_ERROR_PARSING_FAILED);
-  }
 
-  response = createJsonReplyString(true);
-  bool subscribed = false;
   pbnjson::JValue payload = msg.get();
-  int displayId  = payload["displayId"].asNumber<int>();
+  int displayId = payload["displayId"].asNumber<int>();
+#if !defined(FEATURE_DUAL_DISPLAY)
+  displayId = 0;
+#endif
   pbnjson::JValue srcs = payload["src"];
-  if(payload.hasKey("subscribe"))
-    subscribed = payload["subscribe"].asBool();
+  if (srcs.arraySize() <= 0 || static_cast<size_t>(srcs.arraySize()) > MAX_COVER_ART_SOURCES)
+    return replyError(message, MCS_ERROR_PARSING_FAILED);
 
   std::vector<std::string> sources;
-
-  if (!srcs.isArray() || srcs.arraySize() <= 0) {
-    PMLOG_ERROR(CONST_MODULE_MCS,"%s coverArt source is empty", __FUNCTION__);
-    errorCode = MCS_ERROR_PARSING_FAILED;
-    errorText = CSTR_PARSING_ERROR;
-    response  = createJsonReplyString(false, errorCode, errorText);
-    respond(message, response);
-    return true;
-  }
-
   for (int i = 0; i < srcs.arraySize(); i++) {
-     if(!srcs[i].isString() || srcs[i].asString() == "") {
-       PMLOG_ERROR(CONST_MODULE_MCS,"%s coverArt source is not correct", __FUNCTION__);
-       errorCode = MCS_ERROR_PARSING_FAILED;
-       errorText = CSTR_PARSING_ERROR;
-       response  = createJsonReplyString(false, errorCode, errorText);
-       respond(message, response);
-       return true;
-     }
-     sources.push_back(srcs[i].asString());
-  }
-
-#if !defined(FEATURE_DUAL_DISPLAY)
-      displayId = 0;
-#endif
-
-  CLSError lserror;
-  if (LSMessageIsSubscription(&message)) {
-    if (!LSSubscriptionAdd(lsHandle_, "getMediaCoverArtPath", &message, &lserror)) {
-      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionAdd failed ",__FUNCTION__);
-      errorCode = MCS_ERROR_REGISTERSESSION_FAILED;
-      errorText = CSTR_REGISTERSESSION_FAILED;
-      response = createJsonReplyString(false, errorCode, errorText);
-      respond(message, response);
-      return true;
+    if (!srcs[i].isString() || !CoverArtFetcher::validUrl(srcs[i].asString())) {
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s source %d is not an http or https URL", __FUNCTION__, i);
+      return replyError(message, MCS_ERROR_PARSING_FAILED);
     }
+    sources.push_back(srcs[i].asString());
   }
 
-  std::string target = "";
+  if (mediaSessionMgr_.getMediaIdFromDisplayId(displayId).empty())
+    return replyError(message, MCS_ERROR_NO_ACTIVE_SESSION);
 
-  std::string mediaId = mediaSessionMgr_.getMediaIdFromDisplayId(displayId);
-
-  mediaSessionMgr_.setLSHandle(lsHandle_);
-  errorCode = MCS_ERROR_NO_ERROR;
-  errorCode = mediaSessionMgr_.coverArtDownload(mediaId, std::move(sources));
-
-  if(errorCode != MCS_ERROR_NO_ERROR)
-  {
-    pbnjson::JObject responseObj;
-    errorText = CSTR_NO_ACTIVE_SESSION;
-    response = createJsonReplyString(false, errorCode, errorText);
-    respond(message, response);
-    return true;
+  /* Each result goes to this caller alone, if it subscribed: it used to go
+   * to every caller subscribed to any cover art. */
+  bool subscribed = false;
+  if (LSMessageIsSubscription(&message)) {
+    CLSError lserror;
+    if (!LSSubscriptionAdd(lsHandle_, "getMediaCoverArtPath", &message, &lserror)) {
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionAdd failed: %s", __FUNCTION__, lserror.text());
+      return replyError(message, MCS_ERROR_SUBSCRIPTION_FAILED);
+    }
+    subscribed = true;
   }
 
   pbnjson::JValue coverArtArray = pbnjson::Array();
-  for(int i = 0; i < srcs.arraySize(); i++) {
+  for (const std::string &src : sources) {
     pbnjson::JValue coverArtSrcInfo = pbnjson::Object();
-    coverArtSrcInfo.put("src", srcs[i].asString());
-
-    std::string targetPath = COVERART_FILE_PATH + extractFilenameFromUrl(srcs[i].asString());
-    PMLOG_INFO(CONST_MODULE_MCS, "tagetPath : %s", targetPath.c_str());
-    coverArtSrcInfo.put("srcPath", targetPath);
+    coverArtSrcInfo.put("src", src);
+    coverArtSrcInfo.put("srcPath", coverArt_->pathFor(src));
     coverArtArray.append(coverArtSrcInfo);
+
+    unsigned id = coverArt_->fetch(src);
+    if (id && subscribed) {
+      LSMessageRef(&message);
+      coverArtCallers_.emplace(id, &message);
+    }
   }
 
   pbnjson::JObject responseObj;
   responseObj.put("coverArtPathInfo", coverArtArray);
   responseObj.put("subscribed", subscribed);
   responseObj.put("returnValue", true);
-
-  response = responseObj.stringify();
-  PMLOG_INFO(CONST_MODULE_MCS, "%s response : %s", __FUNCTION__, response.c_str());
-  respond(message, response);
-
+  respond(message, responseObj.stringify());
   return true;
 }
+
+void MediaControlService::onCoverArtFetched(const CoverArtFetcher::Result &result) {
+  auto caller = coverArtCallers_.find(result.id);
+  if (caller == coverArtCallers_.end())
+    return;
+
+  pbnjson::JValue responsePayload = pbnjson::Object();
+  responsePayload.put("src", result.url);
+  responsePayload.put("srcPath", result.path);
+  responsePayload.put("returnValue", !result.path.empty());
+  responsePayload.put("subscribed", true);
+  CLSError lserror;
+  if (!LSMessageRespond(caller->second, responsePayload.stringify().c_str(), &lserror))
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSMessageRespond failed: %s", __FUNCTION__, lserror.text());
+  LSMessageUnref(caller->second);
+  coverArtCallers_.erase(caller);
+}
+#endif
 
 bool MediaControlService::setMediaMetaData(LSMessage& message) {
   LSMessageJsonParser msg(&message,STRICT_SCHEMA(PROPS_2(OBJECT(mediaMetaData, OBJSCHEMA_7( \

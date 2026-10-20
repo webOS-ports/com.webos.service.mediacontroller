@@ -106,9 +106,15 @@ TEST_F(Lifecycle, PermissionsCoverTheCallsMade)
             groups.insert(perm["com.webos.service.mediacontroller"][i].asString());
         EXPECT_EQ(groups, (std::set<std::string>{"bluetooth.query", "bluetooth.management"})) << acg;
 
-        std::string role = readFile(dir + "role.json.in");
-        EXPECT_NE(role.find("com.webos.service.bluetooth2"), std::string::npos) << acg;
-        EXPECT_EQ(role.find("com.webos.service.account"), std::string::npos) << acg;
+        // Every client of the service is replied to - web apps, QML apps
+        // under "<appId>-<pid>" names, audiod, luna-send - and bluetooth2
+        // is called: no list of names covers them.
+        std::string role = std::regex_replace(readFile(dir + "role.json.in"), std::regex("@[A-Z_]+@"), "x");
+        pbnjson::JValue permissions = json(role)["permissions"];
+        ASSERT_EQ(permissions.arraySize(), 1) << acg;
+        pbnjson::JValue outbound = permissions[0]["outbound"];
+        ASSERT_EQ(outbound.arraySize(), 1) << acg;
+        EXPECT_EQ(outbound[0].asString(), "*") << acg;
     }
 }
 

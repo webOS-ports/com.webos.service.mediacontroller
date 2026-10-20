@@ -23,50 +23,18 @@ RequestReceiver::RequestReceiver() : clientListInfo_()
 
 void RequestReceiver::addClient (const std::string& mediaId) {
   PMLOG_INFO(CONST_MODULE_RR, "%s mediaId : %s", __FUNCTION__, mediaId.c_str());
-  //check if element is already in list and at front
-  if(mediaId == clientListInfo_.front())
-    return;
-  //find the mediaId and move to top
-  for(auto itr = clientListInfo_.begin(); itr != clientListInfo_.end();) {
-    if(*itr == mediaId) {
-      itr = clientListInfo_.erase(itr);
-      clientListInfo_.push_front(mediaId);
-      return;
-    }
-    else
-      ++itr;
-  }
-  //no element in list, add new to front
+  //the last activated is at the front, once
+  clientListInfo_.remove(mediaId);
   clientListInfo_.push_front(mediaId);
-  return;
 }
 
 void RequestReceiver::removeClient (const std::string& mediaId) {
   PMLOG_INFO(CONST_MODULE_RR, "%s mediaId : %s", __FUNCTION__, mediaId.c_str());
-
-  if (clientListInfo_.empty()) {
-    PMLOG_ERROR(CONST_MODULE_RR, "%s clientListInfo_ is empty", __FUNCTION__);
-    return;
-  }
-
-  for (auto itr = clientListInfo_.begin(); itr != clientListInfo_.end(); ) {
-    if(*itr == mediaId) {
-      itr = clientListInfo_.erase(itr);
-      return;
-    } else {
-        ++itr;
-    }
-  }
-  return;
+  clientListInfo_.remove(mediaId);
 }
 
-std::string RequestReceiver::getLastActiveClient () {
-  PMLOG_INFO(CONST_MODULE_RR, "%s ", __FUNCTION__);
-
-  if (clientListInfo_.empty()) {
-    PMLOG_ERROR(CONST_MODULE_RR, "%s clientListInfo_ is empty", __FUNCTION__);
+std::string RequestReceiver::getLastActiveClient () const {
+  if (clientListInfo_.empty())
     return CSTR_EMPTY;
-  }
-
   return clientListInfo_.front();
 }

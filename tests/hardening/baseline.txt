@@ -1,0 +1,56 @@
+# Static-analysis findings that were looked at and are not fixed, with why.
+# static-analysis.sh fails on anything not listed here; line numbers are
+# ignored when matching, so an entry survives code moving around it.
+# Format: <tool>: <file>:<line>: <message>   # <reason>
+
+# gcc -fanalyzer does not model libstdc++'s std::string small-string
+# buffer: every std::string returned by value (stringify(), a concatenation,
+# a copy) is reported as reading "<unknown>" uninitialised. ASan, UBSan,
+# valgrind memcheck and the unit tests are clean on these paths.
+gcc-fanalyzer-O0: src/Lsutils.cpp:60:32: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO, see above
+gcc-fanalyzer-O2: src/Lsutils.cpp:60:32: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O0: src/MediaControlPrivate.cpp:24:33: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O2: src/MediaControlPrivate.cpp:24:33: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O0: src/MediaControlPrivate.cpp:47:29: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # BTDeviceInfo's std::string members copied into the vector
+gcc-fanalyzer-O2: src/MediaControlPrivate.cpp:47:29: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # as above
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:47:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:47:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:197:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:197:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:218:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO (a string literal returned as std::string)
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:218:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # as above
+
+# The analyzer's own budget running out on pbnjson- and libstdc++-heavy
+# functions: not a finding, a path it did not finish. The same functions
+# are covered by the clang analyzer, the sanitizers and the tests.
+gcc-fanalyzer-O0: src/MediaControlService.cpp:120:1: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:120:1: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/MediaControlService.cpp:502:3: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:502:3: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/MediaControlService.cpp:526:3: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:526:3: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/MediaControlService.cpp:527:1: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:527:1: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/MediaControlService.cpp:946:75: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:946:75: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/MediaControlService.cpp:968:50: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:968:50: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/MediaControlService.cpp:969:33: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/MediaControlService.cpp:969:33: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:218:12: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:218:12: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:404:8: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:404:8: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.h:58:10: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.h:58:10: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.h:96:10: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.h:96:10: warning: terminating analysis (too complex) [-Wanalyzer-too-complex]   # budget
+
+# readdir() is unsafe only on a DIR stream shared between threads; this one
+# is the constructor's own, used before the worker thread exists.
+clang-tidy: src/coverArt/CoverArtFetcher.cpp:234: warning: function is not thread safe [concurrency-mt-unsafe]   # private DIR stream, before the worker starts
+
+# open() of the cache directory: O_DIRECTORY | O_NOFOLLOW, on the service's
+# own directory (systemd's CacheDirectory=), and the fd is only used to
+# empty it of regular files with *at() calls relative to it.
+flawfinder: src/coverArt/CoverArtFetcher.cpp:253:  [2] (misc) open:   # O_NOFOLLOW|O_DIRECTORY, own directory, *at() calls after

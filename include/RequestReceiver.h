@@ -20,8 +20,8 @@
 /*-----------------------------------------------------------------------------
     (File Inclusions)
 ------------------------------------------------------------------------------*/
-#include <map>
 #include <list>
+#include <string>
 
 #include "MediaControlTypes.h"
 
@@ -34,8 +34,9 @@ public:
   RequestReceiver();
   void addClient(const std::string& mediaId);
   void removeClient(const std::string& mediaId);
-  std::string getLastActiveClient();
-  std::list<std::string> getClientList() const { return clientListInfo_; }
+  std::string getLastActiveClient() const;
+  //! Active sessions, the last activated first.
+  const std::list<std::string>& getClientList() const { return clientListInfo_; }
 };
 
 #endif /*REQUEST_RECEIVER_H_*/

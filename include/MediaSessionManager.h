@@ -21,29 +21,33 @@
     (File Inclusions)
 ------------------------------------------------------------------------------*/
 #include <map>
+#include <string>
 #include <vector>
 #include "MediaControlTypes.h"
 #include "RequestReceiver.h"
-#include <luna-service2/lunaservice.hpp>
-#include "FileManager.h"
 
 class MediaSessionManager
 {
 private:
-  MediaSessionManager();
-  ~MediaSessionManager();
   std::map<std::string, mediaSession> mapMediaSessionInfo_;
   RequestReceiver objRequestRcvr_;
-  LSHandle *lshandle_ = nullptr;
-  FileManager *fileManager;
+
+  //! The session, or null - logged as caller's - if there is none.
+  mediaSession *find(const std::string& mediaId, const char *caller);
 
 public:
-  static MediaSessionManager &getInstance();
+  MediaSessionManager();
+  ~MediaSessionManager();
+  MediaSessionManager(const MediaSessionManager&) = delete;
+  MediaSessionManager& operator=(const MediaSessionManager&) = delete;
+
   int addMediaSession (const std::string& mediaId,
                        const std::string& appId);
   int activateMediaSession (const std::string& mediaId);
   int deactivateMediaSession (const std::string& mediaId);
   int removeMediaSession (const std::string& mediaId);
+  //! Every session gone, active or not.
+  void clear();
   int getMediaMetaData(const std::string& mediaId,
                        mediaMetaData& objMetaData);
   int getMediaCoverArt(const std::string& mediaId,
@@ -70,15 +74,16 @@ public:
                          const std::string& muteStatus);
   int setMediaPlayPosition(const std::string& mediaId,
                            const std::string& playPosition);
-  std::vector<std::string> getMediaSessionList(const std::string& appId);
-  std::vector<std::string> getActiveMediaSessionList();
-  std::string getCurrentActiveSession();
-  bool validatePlayStatus(const std::string& playStatus);
-  int getDisplayIdForMedia(const std::string& mediaId);
-  std::string getMediaIdFromDisplayId(const int& displayId);
-  int coverArtDownload(const std::string& mediaId, const std::vector<std::string> uri);
-  bool download(const std::string& uri);
-  void setLSHandle(LSHandle *lshandle) { lshandle_ = lshandle;};
+  std::vector<std::string> getMediaSessionList(const std::string& appId) const;
+  //! Active sessions, the last activated first.
+  std::vector<std::string> getActiveMediaSessionList() const;
+  std::string getCurrentActiveSession() const;
+  static bool validatePlayStatus(const std::string& playStatus);
+  int getDisplayIdForMedia(const std::string& mediaId) const;
+  std::string getMediaIdFromDisplayId(int displayId) const;
+  //! The display an app is on: with FEATURE_DUAL_DISPLAY the last
+  //! character of its appId, when that is a digit; else 0.
+  static int displayIdFromAppId(const std::string& appId);
 };
 
 #endif /*MEDIA_SESSION_MANAGER_H_*/

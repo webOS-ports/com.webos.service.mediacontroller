@@ -1,7 +1,10 @@
 [Unit]
 Description=webos - "%n"
-Requires=ls-hubd.service webos-bluetooth-service
-After=ls-hubd.service webos-bluetooth-service
+Requires=ls-hubd.service
+# Bluetooth is optional: the service follows bluetooth2 coming and going,
+# and must not be stopped with it.
+Wants=webos-bluetooth-service.service
+After=ls-hubd.service webos-bluetooth-service.service
 
 [Service]
 Type=simple

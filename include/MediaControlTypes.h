@@ -23,35 +23,33 @@
 #include <string>
 #include <vector>
 #include "PmLogLib.h"
+#include <luna-service2/lunaservice.h>
 
-const std::string CSTR_INVALID_MEDIAID = "Invalid mediaId";
-const std::string CSTR_REGISTERSESSION_FAILED = "MediaId registeration failed";
-const std::string CSTR_PARSING_ERROR = "Parsing Error";
-const std::string CSTR_INVALID_APPID = "Invalid appId";
-const std::string CSTR_NO_ACTIVE_SESSION = "No session is active";
-const std::string CSTR_SESSION_ALREADY_REGISTERED = "Media session already registered";
-const std::string CSTR_SESSION_INVALID_PLAY_STATE = "Invalid Play State";
-const std::string CSTR_SESSION_INVALID_MUTE_STATUS = "Invalid Mute Status";
-const std::string CSTR_SUBSCRIPTION_FAILED = "LSSubscriptionAdd failed";
-const std::string CSTR_SUBSCRIPTION_REPLY_FAILED = "LSSubscriptionReply failed";
-const std::string CSTR_EMPTY = "";
-const std::string CTSR_INVALID_DISPLAYID = "Invalid displayId";
-const std::string CTSR_INVALID_EVENT = "Invalid Event";
+inline const std::string CSTR_INVALID_MEDIAID = "Invalid mediaId";
+inline const std::string CSTR_REGISTERSESSION_FAILED = "MediaId registeration failed";
+inline const std::string CSTR_PARSING_ERROR = "Parsing Error";
+inline const std::string CSTR_INVALID_APPID = "Invalid appId";
+inline const std::string CSTR_NO_ACTIVE_SESSION = "No session is active";
+inline const std::string CSTR_SESSION_ALREADY_REGISTERED = "Media session already registered";
+inline const std::string CSTR_SESSION_INVALID_PLAY_STATE = "Invalid Play State";
+inline const std::string CSTR_SESSION_INVALID_MUTE_STATUS = "Invalid Mute Status";
+inline const std::string CSTR_SUBSCRIPTION_FAILED = "LSSubscriptionAdd failed";
+inline const std::string CSTR_SUBSCRIPTION_REPLY_FAILED = "LSSubscriptionReply failed";
+inline const std::string CSTR_EMPTY = "";
+inline const std::string CTSR_INVALID_DISPLAYID = "Invalid displayId";
+inline const std::string CTSR_INVALID_EVENT = "Invalid Event";
 
 #define CONST_MODULE_MCS "MediaControlService"
 #define CONST_MODULE_MCP "MediaControlPrivate"
 #define CONST_MODULE_MSM "MediaSessionManager"
 #define CONST_MODULE_RR  "RequestReceiver"
 #define CONST_MODULE_MCD  "MediaControlDownloader"
-#define CONST_MODULE_MCFM  "MediaControlFileManager"
 
-#define SET 1
-#define RESET 0
+#define PMLOG_ERROR(module, ...) PmLogMsg(getLunaPmLogContext(), Error, module, 0, __VA_ARGS__)
+#define PMLOG_INFO(module, ...) PmLogMsg(getLunaPmLogContext(), Info, module, 0, __VA_ARGS__)
 
-#define PMLOG_ERROR(module, args...) PmLogMsg(getLunaPmLogContext(), Error, module, 0, ##args)
-#define PMLOG_INFO(module, args...) PmLogMsg(getLunaPmLogContext(), Info, module, 0, ##args)
-#define PMLOG_DEBUG(args...) PmLogMsg(getLunaPmLogContext(), Debug, NULL, 0, ##args)
-
+/* The errorCode of a failed call, as it goes on the bus. The numbers are
+ * the API: an invalid mediaId is 0, and 10 is not an error at all. */
 enum MCSErrorCode {
   MCS_ERROR_INVALID_MEDIAID = 0,
   MCS_ERROR_REGISTERSESSION_FAILED,
@@ -66,17 +64,6 @@ enum MCSErrorCode {
   MCS_ERROR_NO_ERROR,
   MCS_ERROR_INVALID_DISPLAYID,
   MCS_ERROR_INVALID_EVENT
-};
-
-enum MediaPlayState {
-  PLAY_STATE_NONE = 0,
-  PLAY_STATE_STOPPED,
-  PLAY_STATE_PAUSED,
-  PLAY_STATE_PLAYING,
-  PLAY_STATE_FAST_FORWARDING,
-  PLAY_STATE_REWINDING,
-  PLAY_STATE_BUFFERING,
-  PLAY_STATE_ERROR
 };
 
 class mediaMetaData {
@@ -94,7 +81,7 @@ public:
     volume_(0) {}
   mediaMetaData(const std::string& title, const std::string& artist,
                 const std::string& duration, const std::string& album,
-                const std::string& genre, const int& trackNumber, const int& volume) :
+                const std::string& genre, int trackNumber, int volume) :
     title_(title),
     artist_(artist),
     totalDuration_(duration),
@@ -110,47 +97,12 @@ public:
   std::string getGenre() const {return genre_;}
   int getTrackNumber() const {return trackNumber_;}
   int getVolume() const {return volume_;}
-
-  void setTitle(const std::string& title) {
-    if(!title.empty() && title_ != title)
-      title_ = title;
-  }
-  void setArtist(const std::string& artist) {
-    if(!artist.empty() && artist_ != artist)
-      artist_ = artist;
-  }
-  void setDuration(const std::string& duration) {
-    if(!duration.empty() && totalDuration_ != duration)
-      totalDuration_ = duration;
-  }
-  void setAlbum(const std::string& album) {
-    if(!album.empty() && album_ != album)
-      album_ = album;
-  }
-  void setGenre(const std::string& genre) {
-    if(!genre.empty() && genre_ != genre)
-      genre_ = genre;
-  }
-  void setTrackNumber(const int& trackNum) {
-    if(trackNum && trackNumber_ != trackNum)
-      trackNumber_ = trackNum;
-  }
-  void setVolume(const int& volume) {
-    if(volume && volume_ != volume)
-      volume_ = volume;
-  }
 };
 
-typedef struct {
+struct coverArtSize {
   int width;
   int height;
-
-  //TODO Overload the == operator to compare two coverArtSize struct
-  //bool operator!=(const coverArtSize& other) const {
-  //  return (width != other.width) || (height != other.height);
-  //}
-
-} coverArtSize;
+};
 
 class mediaCoverArt {
 private:
@@ -158,11 +110,9 @@ private:
   std::string type_;
   std::vector<coverArtSize> size_;
 public:
-  mediaCoverArt() :
-    src_(""),
-    type_("") {}
+  mediaCoverArt() {}
   mediaCoverArt(const std::string& src, const std::string& type,
-                const std::vector<coverArtSize> size) :
+                std::vector<coverArtSize> size) :
     src_(src),
     type_(type),
     size_(std::move(size)) {}
@@ -171,17 +121,6 @@ public:
   std::string getType() const {return type_;}
   std::vector<coverArtSize> getSize() const {return size_;}
 
-  void setSource(const std::string& src) {
-    if(!src.empty() && src_ != src)
-      src_ = src;
-  }
-  void setType(const std::string& type) {
-    if(!type.empty() && type_ != type)
-      type_ = type;
-  }
-  void setSize(const std::vector<coverArtSize> size) {
-    size_ = std::move(size);
-  }
 };
 
 class mediaSession {
@@ -224,12 +163,6 @@ public:
 
   std::vector<std::string> getActionObj() const { return enableActions_; }
 
-  void setMediaId(const std::string& mediaId) {
-    mediaId_ = mediaId;
-  }
-  void setAppId(const std::string& appId) {
-    appId_ = appId;
-  }
   void setPlayStatus(const std::string& playStatus) {
     playStatus_ = playStatus;
   }
@@ -239,14 +172,10 @@ public:
   void setPlayposition(const std::string& playPosition) {
     playPosition_ = playPosition;
   }
+  /* The metadata of what plays now, whole: a field the new track does
+   * not have must not keep the last track's. */
   void setMetaData(const mediaMetaData& objMetaData) {
-    objMetaData_.setTitle(objMetaData.getTitle());
-    objMetaData_.setArtist(objMetaData.getArtist());
-    objMetaData_.setDuration(objMetaData.getDuration());
-    objMetaData_.setAlbum(objMetaData.getAlbum());
-    objMetaData_.setGenre(objMetaData.getGenre());
-    objMetaData_.setTrackNumber(objMetaData.getTrackNumber());
-    objMetaData_.setVolume(objMetaData.getVolume());
+    objMetaData_ = objMetaData;
   }
 
   void setCoverArt(const std::vector<mediaCoverArt>& objCoverArt) {
@@ -261,19 +190,18 @@ public:
 struct BTDeviceInfo {
   std::string deviceAddress_;
   std::string adapterAddress_;
-  std::string deviceSetId_;
-  int displayId_ = -1;
+  int displayId_ = 0;
+  /* The device's avrcp/receivePassThroughCommand subscription. */
+  LSMessageToken passThroughToken_ = LSMESSAGE_TOKEN_INVALID;
   BTDeviceInfo() {}
-  BTDeviceInfo(const std::string& address, const std::string &adapterAddress, std::string deviceSetId,
-               const int& displayId = -1) :
+  BTDeviceInfo(const std::string& address, const std::string &adapterAddress, int displayId = 0) :
     deviceAddress_(address),
     adapterAddress_(adapterAddress),
-    deviceSetId_(std::move(deviceSetId)),
     displayId_(displayId)
   {}
 };
 
-static std::string getErrorTextFromErrorCode(const int& errorCode) {
+inline std::string getErrorTextFromErrorCode(int errorCode) {
   switch(errorCode) {
     case MCS_ERROR_INVALID_MEDIAID:
       return CSTR_INVALID_MEDIAID;
@@ -289,6 +217,8 @@ static std::string getErrorTextFromErrorCode(const int& errorCode) {
       return CSTR_SESSION_ALREADY_REGISTERED;
     case MCS_ERROR_SESSION_INVALID_PLAY_STATE:
       return CSTR_SESSION_INVALID_PLAY_STATE;
+    case MCS_ERROR_SESSION_INVALID_MUTE_STATUS:
+      return CSTR_SESSION_INVALID_MUTE_STATUS;
     case MCS_ERROR_SUBSCRIPTION_FAILED:
       return CSTR_SUBSCRIPTION_FAILED;
     case MCS_ERROR_SUBSCRIPTION_REPLY_FAILED:
@@ -302,11 +232,15 @@ static std::string getErrorTextFromErrorCode(const int& errorCode) {
   }
 }
 
-static PmLogContext getLunaPmLogContext() {
-  static PmLogContext logContext = 0;
-  if (0 == logContext)
-    PmLogGetContext("mediacontroller", &logContext);
+/* One context for the process, looked up once, from whichever thread logs
+ * first. */
+inline PmLogContext getLunaPmLogContext() {
+  static const PmLogContext logContext = [] {
+    PmLogContext context = nullptr;
+    PmLogGetContext("mediacontroller", &context);
+    return context;
+  }();
   return logContext;
 }
 
-#endif /*MEDIA_CONTROL_SERVICE_H_*/
+#endif /*MEDIA_CONTROL_TYPES_H_*/

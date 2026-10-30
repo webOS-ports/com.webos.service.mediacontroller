@@ -1052,9 +1052,17 @@ bool MediaControlService::setMediaPlayStatus(LSMessage& message) {
   std::string mediaId = mediaIdOf(msg);
   std::string playStatus;
   msg.get("playStatus", playStatus);
-  int errorCode = mediaSessionMgr_.setMediaPlayStatus(mediaId, playStatus);
+  std::vector<std::string> toPause;
+  int errorCode = mediaSessionMgr_.setMediaPlayStatus(mediaId, playStatus,
+                                                      g_get_monotonic_time() / 1000, toPause);
   if (errorCode != MCS_ERROR_NO_ERROR)
     return replyError(message, errorCode);
+
+  //the last one started wins
+  for (const auto& other : toPause) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s pausing %s for %s", __FUNCTION__, other.c_str(), mediaId.c_str());
+    sendKeyEvent(other, "pause");
+  }
 
   notifyBTPlayStatus(mediaId, playStatus);
 

@@ -30,6 +30,7 @@ LSU = "include/Lsutils.h"
 LSUC = "src/Lsutils.cpp"
 MAIN = "src/main.cpp"
 FETCH = "src/coverArt/CoverArtFetcher.cpp"
+FOCUS = "src/MediaFocus.cpp"
 
 # name, file, text, replacement, what should catch it (file, text and
 # replacement may be parallel lists, for a mutant that needs more than one
@@ -154,6 +155,37 @@ MUTANTS = [
     ("destructor-waits-for-transfer", FETCH,
      "  return static_cast<Transfer *>(userp)->stopping->load() ? 1 : 0;", "  (void)userp;\n  return 0;",
      "Fetcher.EmptiesTheCacheAtStartAndStopsATransferWhenDestroyed"),
+    # Media focus: the keys follow what started last, which wins.
+    ("focus-flicker-is-a-start", FOCUS,
+     "    return !(state.stopped && nowMs - state.stoppedAt < kCarryOnMs);",
+     "    return true;",
+     "FocusService.TheMusicAppsFlickerTakesNeitherTheKeysNorTheVideo"),
+    ("focus-carry-on-forever", FOCUS,
+     "nowMs - state.stoppedAt < kCarryOnMs", "nowMs - state.stoppedAt >= 0",
+     "Focus.PlayingAgainAfterTheCarryOnTimeIsAStart"),
+    ("focus-start-not-activated", MSM,
+     "  objRequestRcvr_.addClient(mediaId);\n  std::vector<MediaFocus::Session>",
+     "  std::vector<MediaFocus::Session>",
+     "FocusService.StartingToPlayTakesTheKeysWithoutActivating"),
+    ("focus-others-play-on", MCS,
+     '    sendKeyEvent(other, "pause");\n', "",
+     "FocusService.TheLastOneStartedWins"),
+    ("focus-own-app-paused", FOCUS,
+     "session.mediaId == starter.mediaId || session.appId == starter.appId ||",
+     "session.mediaId == starter.mediaId ||",
+     "FocusService.PausedSessionsAndTheSameAppAreLeftAlone"),
+    ("focus-other-display-paused", FOCUS,
+     "        session.displayId != starter.displayId || !isPlaying", "        !isPlaying",
+     "Focus.AStartPausesOtherAppsPlayingOnItsDisplay"),
+    ("focus-paused-sessions-paused", FOCUS,
+     "|| !isPlaying(session.playStatus))", ")",
+     "FocusService.PausedSessionsAndTheSameAppAreLeftAlone"),
+    ("focus-buffering-stops-it", FOCUS,
+     "  if (isPlaying(playStatus))\n    return false;\n", "",
+     "Focus.SeekingAndBufferingNeitherStartNorStop"),
+    ("focus-gone-session-remembered", MSM,
+     "  focus_.forget(mediaId);\n", "",
+     "FocusService.AnUnregisteredSessionStartsAfresh"),
 ]
 
 S = os.path.join(opts.workdir, "recipe-sysroot")

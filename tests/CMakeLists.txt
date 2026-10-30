@@ -28,6 +28,7 @@ set(MCS_TEST_SOURCES
     fakes/fakebus.cpp
     unit/test_lifecycle.cpp
     unit/test_sessions.cpp
+    unit/test_focus.cpp
     unit/test_replies.cpp
     unit/test_bluetooth.cpp
     unit/test_coverart.cpp)

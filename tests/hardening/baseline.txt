@@ -19,6 +19,8 @@ gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:197:12: warning: use of unini
 gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:197:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO
 gcc-fanalyzer-O0: src/coverArt/CoverArtFetcher.cpp:218:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # std::string SSO (a string literal returned as std::string)
 gcc-fanalyzer-O2: src/coverArt/CoverArtFetcher.cpp:218:12: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # as above
+gcc-fanalyzer-O0: src/MediaFocus.cpp:53:28: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # a std::vector<std::string> default-constructed, the strings pushed into it copies: SSO
+gcc-fanalyzer-O2: src/MediaFocus.cpp:53:28: warning: use of uninitialized value '<unknown>' [CWE-457] [-Wanalyzer-use-of-uninitialized-value]   # as above
 
 # The analyzer's own budget running out on pbnjson- and libstdc++-heavy
 # functions: not a finding, a path it did not finish. The same functions

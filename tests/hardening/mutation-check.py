@@ -186,6 +186,19 @@ MUTANTS = [
     ("focus-gone-session-remembered", MSM,
      "  focus_.forget(mediaId);\n", "",
      "FocusService.AnUnregisteredSessionStartsAfresh"),
+    # The headset's one button: a toggle, which apps do not know.
+    ("playpause-sent-as-it-is", MCS,
+     "MediaFocus::resolveKey(keyEvent, playStatus)", "keyEvent",
+     "FocusService.TheHeadsetButtonPausesWhatPlaysAndPlaysWhatIsPaused"),
+    ("playpause-always-pauses", FOCUS,
+     'isPlaying(playStatus) ? "pause" : "play"', '"pause"',
+     "Focus.TheHeadsetsPlayPauseIsPauseWhilePlayingAndPlayOtherwise"),
+    ("playpause-only-while-really-playing", FOCUS,
+     'isPlaying(playStatus) ? "pause" : "play"', 'playStatus == "PLAYSTATE_PLAYING" ? "pause" : "play"',
+     "Focus.TheHeadsetsPlayPauseIsPauseWhilePlayingAndPlayOtherwise"),
+    ("every-key-toggles", FOCUS,
+     '  if (keyEvent != "playPause")\n    return keyEvent;\n', "",
+     "Focus.OtherKeysGoAsTheyAre"),
 ]
 
 S = os.path.join(opts.workdir, "recipe-sysroot")

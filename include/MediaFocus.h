@@ -65,6 +65,12 @@ public:
   //! them out itself, as a browser does its tabs.
   static std::vector<std::string> toPause(const Session& starter, const std::vector<Session>& sessions);
 
+  //! The key event to send for keyEvent to a session in playStatus.
+  //! "playPause", a headset's one button, is "pause" while it plays and
+  //! "play" otherwise: apps know play and pause, not a toggle. Any other
+  //! key is sent as it is.
+  static std::string resolveKey(const std::string& keyEvent, const std::string& playStatus);
+
 private:
   struct State
   {

@@ -49,6 +49,12 @@ bool MediaFocus::isPlaying(const std::string& playStatus) {
          playStatus == "PLAYSTATE_REWINDING" || playStatus == "PLAYSTATE_BUFFERING";
 }
 
+std::string MediaFocus::resolveKey(const std::string& keyEvent, const std::string& playStatus) {
+  if (keyEvent != "playPause")
+    return keyEvent;
+  return isPlaying(playStatus) ? "pause" : "play";
+}
+
 std::vector<std::string> MediaFocus::toPause(const Session& starter, const std::vector<Session>& sessions) {
   std::vector<std::string> paused;
   for (const auto& session : sessions) {

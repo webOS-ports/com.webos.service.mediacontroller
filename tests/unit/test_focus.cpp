@@ -122,6 +122,21 @@ TEST(Focus, AStartPausesOtherAppsPlayingOnItsDisplay)
     EXPECT_TRUE(MediaFocus::toPause(video, {video}).empty());
 }
 
+TEST(Focus, TheHeadsetsPlayPauseIsPauseWhilePlayingAndPlayOtherwise)
+{
+    for (const char* sounding : {kPlaying, "PLAYSTATE_FAST_FORWARDING", "PLAYSTATE_REWINDING",
+                                 "PLAYSTATE_BUFFERING"})
+        EXPECT_EQ(MediaFocus::resolveKey("playPause", sounding), "pause") << sounding;
+    for (const char* quiet : {kPaused, "PLAYSTATE_STOPPED", "PLAYSTATE_NONE", ""})
+        EXPECT_EQ(MediaFocus::resolveKey("playPause", quiet), "play") << quiet;
+}
+
+TEST(Focus, OtherKeysGoAsTheyAre)
+{
+    for (const char* key : {"play", "pause", "stop", "next", "previous", "PlayPause", "toggle"})
+        EXPECT_EQ(MediaFocus::resolveKey(key, kPlaying), key);
+}
+
 // Through the service.
 
 typedef McsTest FocusService;
@@ -253,6 +268,20 @@ TEST_F(FocusService, AnUnregisteredSessionStartsAfresh)
     status(this, "video", kPlaying);
     EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause"}))
         << "the new session was taken for the old one carrying on";
+}
+
+TEST_F(FocusService, TheHeadsetButtonPausesWhatPlaysAndPlaysWhatIsPaused)
+{
+    // The shell sends the wired headset's button as "playPause"; the Music
+    // app knows only play and pause.
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    status(this, "music", kPlaying);
+    EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"playPause\"}")));
+    status(this, "music", kPaused);
+    EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"playPause\"}")));
+    EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"next\"}")));
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play", "next"}));
 }
 
 } // namespace

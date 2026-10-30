@@ -1220,7 +1220,9 @@ bool MediaControlService::injectMediaKeyEvent(LSMessage &message) {
   std::string mediaId = mediaSessionMgr_.getMediaIdFromDisplayId(displayId);
   if (mediaId.empty())
     return replyError(message, MCS_ERROR_NO_ACTIVE_SESSION);
-  if (!sendKeyEvent(mediaId, keyEvent))
+  std::string playStatus;
+  mediaSessionMgr_.getMediaPlayStatus(mediaId, playStatus);
+  if (!sendKeyEvent(mediaId, MediaFocus::resolveKey(keyEvent, playStatus)))
     return replyError(message, MCS_ERROR_SUBSCRIPTION_REPLY_FAILED);
   return replySuccess(message);
 }

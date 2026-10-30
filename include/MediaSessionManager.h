@@ -20,10 +20,12 @@
 /*-----------------------------------------------------------------------------
     (File Inclusions)
 ------------------------------------------------------------------------------*/
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
 #include "MediaControlTypes.h"
+#include "MediaFocus.h"
 #include "RequestReceiver.h"
 
 class MediaSessionManager
@@ -31,6 +33,7 @@ class MediaSessionManager
 private:
   std::map<std::string, mediaSession> mapMediaSessionInfo_;
   RequestReceiver objRequestRcvr_;
+  MediaFocus focus_;
 
   //! The session, or null - logged as caller's - if there is none.
   mediaSession *find(const std::string& mediaId, const char *caller);
@@ -68,8 +71,13 @@ public:
                        const std::vector<mediaCoverArt>& objCoverArt);
   int setMediaAction(const std::string& mediaId,
                      const std::vector<std::string>& mediaAction);
+  //! Records playStatus, reported at nowMs (monotonic, milliseconds).
+  //! When it starts mediaId playing (see MediaFocus) the session becomes
+  //! the active one, and toPause gets the sessions it stops.
   int setMediaPlayStatus(const std::string& mediaId,
-                         const std::string& playStatus);
+                         const std::string& playStatus,
+                         std::int64_t nowMs,
+                         std::vector<std::string>& toPause);
   int setMediaMuteStatus(const std::string& mediaId,
                          const std::string& muteStatus);
   int setMediaPlayPosition(const std::string& mediaId,

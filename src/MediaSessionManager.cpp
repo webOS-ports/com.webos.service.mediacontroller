@@ -68,6 +68,7 @@ int MediaSessionManager::removeMediaSession(const std::string& mediaId) {
     return MCS_ERROR_INVALID_MEDIAID;
   }
   objRequestRcvr_.removeClient(mediaId);
+  focus_.forget(mediaId);
   return MCS_ERROR_NO_ERROR;
 }
 
@@ -75,6 +76,7 @@ void MediaSessionManager::clear() {
   for (const auto& session : mapMediaSessionInfo_)
     objRequestRcvr_.removeClient(session.first);
   mapMediaSessionInfo_.clear();
+  focus_.clear();
 }
 
 int MediaSessionManager::getMediaMetaData(const std::string& mediaId,
@@ -168,15 +170,31 @@ int MediaSessionManager::setMediaAction(const std::string& mediaId,
 }
 
 int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,
-                                            const std::string& playStatus) {
+                                            const std::string& playStatus,
+                                            std::int64_t nowMs,
+                                            std::vector<std::string>& toPause) {
   PMLOG_INFO(CONST_MODULE_MSM, "%s mediaId : %s playStatus : %s", __FUNCTION__,
              mediaId.c_str(), playStatus.c_str());
+  toPause.clear();
   if (!validatePlayStatus(playStatus))
     return MCS_ERROR_SESSION_INVALID_PLAY_STATE;
   mediaSession *session = find(mediaId, __FUNCTION__);
   if (!session)
     return MCS_ERROR_INVALID_MEDIAID;
   session->setPlayStatus(playStatus);
+  if (!focus_.update(mediaId, playStatus, nowMs))
+    return MCS_ERROR_NO_ERROR;
+
+  //a start: the keys go to it, and the others playing stop
+  PMLOG_INFO(CONST_MODULE_MSM, "%s %s started playing", __FUNCTION__, mediaId.c_str());
+  objRequestRcvr_.addClient(mediaId);
+  std::vector<MediaFocus::Session> sessions;
+  sessions.reserve(mapMediaSessionInfo_.size());
+  for (const auto& itr : mapMediaSessionInfo_)
+    sessions.push_back({itr.first, itr.second.getAppId(), getDisplayIdForMedia(itr.first),
+                        itr.second.getPlayStatus()});
+  toPause = MediaFocus::toPause({mediaId, session->getAppId(), getDisplayIdForMedia(mediaId), playStatus},
+                                sessions);
   return MCS_ERROR_NO_ERROR;
 }
 

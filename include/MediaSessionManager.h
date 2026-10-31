@@ -92,12 +92,19 @@ public:
   //! on: the last started wins. The first is the one that played on its
   //! own; one that played after it may be its echo (spotify-webos-service's
   //! session, which plays when the Music app tells it to). None if that
-  //! one plays already.
+  //! one plays already - or, if it only still says so, its pause for the
+  //! call not reported yet: then its play waits for that (MediaFocus::
+  //! awaitPause), and playAfterPause says when.
   std::string playAfterCall(std::int64_t nowMs);
+  //! mediaId has reported playStatus at nowMs: whether to play it now, as
+  //! its play was waiting for this.
+  bool playAfterPause(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs);
   //! See MediaFocus::playSent, keySent and playOnItsWay.
   void playSent(const std::string& mediaId) { focus_.playSent(mediaId); }
   void keySent(const std::string& mediaId) { focus_.keySent(mediaId); }
-  bool playOnItsWay(const std::string& mediaId) const { return focus_.playOnItsWay(mediaId); }
+  bool playOnItsWay(const std::string& mediaId, std::int64_t nowMs) const {
+    return focus_.playOnItsWay(mediaId, nowMs);
+  }
   int setMediaMuteStatus(const std::string& mediaId,
                          const std::string& muteStatus);
   int setMediaPlayPosition(const std::string& mediaId,

@@ -539,6 +539,168 @@ TEST_F(CallKeysService, AGoneSessionMakesWayForTheNext)
     EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
 }
 
+TEST_F(CallKeysService, MusicPlaysOnWhenItsPauseIsReportedAfterTheCallEnded)
+{
+    // 31 October 16:00:46, on the first build of this: the app played at
+    // .430 and was sent the pause, the Phone app let go at .740, and the
+    // app said PAUSED only at .787. At the call's end the session still
+    // said it played, so the held play was taken as needless and lost.
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    status("music", kPlaying);
+    std::string calls = phone();
+    status("music", kPaused);
+    later(1516);
+    status("music", kPlaying);
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"});
+    later(310);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"}) << "played before its pause was reported";
+    later(20);
+    status("music", kPlaying);         // another report of playing is no answer
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"});
+    later(27);
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
+    status("music", kPlaying);
+    // that was the one play: a pause of the user's right after is one
+    later(10);
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music).size(), 2u);
+}
+
+TEST_F(CallKeysService, AfterAHangUpAPauseReportedLateStillPlays)
+{
+    // 13:38 as it was: PAUSED came at 20.786, 178 ms after the keys went
+    // and after audiod's inCall false, the app having played at 20.478.
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    status("music", kPlaying);
+    std::string calls = phone();
+    status("music", kPaused);
+    audiodCall(true);
+    later(3300);
+    status("music", kPlaying);
+    later(15);
+    audiodCall(false);
+    later(115);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(178);
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
+}
+
+TEST_F(CallKeysService, APauseReportedTooLateIsARealOne)
+{
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string radio = session("radio", "com.radio", app(":1.3"), false);
+
+    // the last moment it counts, and the first it does not
+    std::string calls = phone();
+    status("radio", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(MediaFocus::kPauseAnswerMs - 1);
+    status("radio", kPaused);
+    EXPECT_EQ(keyEvents(radio), (std::vector<std::string>{"pause", "play"}));
+
+    calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(MediaFocus::kPauseAnswerMs);
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"});
+    // and the waiting is over for a key too
+    EXPECT_TRUE(returnValue(key("play")));
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
+
+    // no report at all: the time out is the end of it just the same
+    calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(MediaFocus::kPauseAnswerMs);
+    EXPECT_TRUE(returnValue(key("stop")));
+    EXPECT_TRUE(returnValue(key("play")));
+    EXPECT_EQ(keyEvents(music).back(), "play");
+}
+
+TEST_F(CallKeysService, AWaitOutOfTimeDoesNotSwallowAPlay)
+{
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(MediaFocus::kPauseAnswerMs);
+    EXPECT_TRUE(returnValue(key("play")));
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
+}
+
+TEST_F(CallKeysService, AudiodsPlayWhileThePauseIsOutstandingIsNotASecond)
+{
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    EXPECT_TRUE(returnValue(key("play")));
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"});
+    later(50);
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
+    EXPECT_TRUE(returnValue(key("play")));
+    EXPECT_EQ(keyEvents(music).size(), 2u);
+}
+
+TEST_F(CallKeysService, AKeyWhileThePauseIsOutstandingCancelsThePlay)
+{
+    // the button pressed after the call, the session saying it plays
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    EXPECT_TRUE(returnValue(key("playPause")));
+    later(50);
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "pause"}));
+}
+
+TEST_F(CallKeysService, ACallBeforeThePauseIsReportedHoldsThePlayAgain)
+{
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(50);
+    std::string again = phone();
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"}) << "played during a call";
+    later(100);
+    EXPECT_TRUE(fakebus::cancel(again));
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play"}));
+}
+
+TEST_F(CallKeysService, AnAnsweredPauseHoldsThePlayOnlyOnce)
+{
+    // the pause reported during the next call holds the play from then;
+    // a further report of stopping does not hold it anew, so it runs out
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string calls = phone();
+    status("music", kPlaying);
+    EXPECT_TRUE(fakebus::cancel(calls));
+    later(10);
+    std::string again = phone();
+    status("music", kPaused);
+    later(MediaFocus::kPauseAnswerMs - 100);
+    call("setMediaPlayStatus", "{\"mediaId\":\"music\",\"playStatus\":\"PLAYSTATE_STOPPED\"}", app(":1.1"));
+    later(MediaFocus::kPlayAfterCallMs - MediaFocus::kPauseAnswerMs + 100);
+    EXPECT_TRUE(fakebus::cancel(again));
+    EXPECT_EQ(keyEvents(music), std::vector<std::string>{"pause"});
+}
+
 TEST_F(CallKeysService, AudiodsPlayAfterTheCallIsCarriedOut)
 {
     // A player with no call watcher of its own, playing when the call is
@@ -650,6 +812,9 @@ TEST_F(CallKeysService, NothingIsPlayedThatPlaysAlreadyOrHasGone)
     EXPECT_TRUE(fakebus::cancel(calls));
     EXPECT_EQ(keyEvents(music).size(), MediaFocus::kRepauseLimit) << "a session playing was sent play";
     EXPECT_EQ(fakebus::replies().size(), replied) << "something was sent after the call";
+    // it plays with no pause outstanding: stopping is its own
+    status("music", kPaused);
+    EXPECT_EQ(keyEvents(music).size(), MediaFocus::kRepauseLimit) << "a stop after the call was made a play";
 }
 
 TEST_F(CallKeysService, AudiodsPlayAfterTheEndIsNotSentTwice)

@@ -1163,7 +1163,8 @@ bool MediaControlService::setMediaPlayStatus(LSMessage& message) {
   msg.get("playStatus", playStatus);
   std::vector<std::string> toPause;
   bool refused = false;
-  int errorCode = mediaSessionMgr_.setMediaPlayStatus(mediaId, playStatus, clock_(),
+  std::int64_t now = clock_();
+  int errorCode = mediaSessionMgr_.setMediaPlayStatus(mediaId, playStatus, now,
                                                       MediaFocus::refusesStart(audio()), toPause, refused);
   if (errorCode != MCS_ERROR_NO_ERROR)
     return replyError(message, errorCode);
@@ -1188,6 +1189,16 @@ bool MediaControlService::setMediaPlayStatus(LSMessage& message) {
   pbnjson::JValue event = pbnjson::Object();
   event.put("playStatus", playStatus);
   broadcastPlaybackInfo(mediaId, "playStatus", event);
+
+  /* The pause it was sent for the call, reported after the call ended: its
+   * held play goes now - or waits for the end of the next call, if one has
+   * come. */
+  if (mediaSessionMgr_.playAfterPause(mediaId, playStatus, now)) {
+    if (MediaFocus::refusesStart(audio()))
+      mediaSessionMgr_.deferPlay(mediaId, now);
+    else
+      playAfterCall(mediaId);
+  }
   return replySuccess(message);
 }
 
@@ -1366,7 +1377,7 @@ bool MediaControlService::injectMediaKeyEvent(LSMessage &message) {
   }
   /* audiod's play after a call that ended before it came: the play it
    * held back is on its way already. */
-  if (key == "play" && mediaSessionMgr_.playOnItsWay(mediaId)) {
+  if (key == "play" && mediaSessionMgr_.playOnItsWay(mediaId, clock_())) {
     PMLOG_INFO(CONST_MODULE_MCS, "%s play for %s: sent already as the call ended", __FUNCTION__,
                mediaId.c_str());
     return replySuccess(message);
@@ -1384,8 +1395,11 @@ void MediaControlService::callMayHaveEnded(const MediaFocus::Audio& before) {
   if (!MediaFocus::callEnded(before, audio()))
     return;
   std::string mediaId = mediaSessionMgr_.playAfterCall(clock_());
-  if (mediaId.empty())
-    return;
+  if (!mediaId.empty())
+    playAfterCall(mediaId);
+}
+
+void MediaControlService::playAfterCall(const std::string& mediaId) {
   PMLOG_INFO(CONST_MODULE_MCS, "%s playing %s: it was to play as the call ended", __FUNCTION__,
              mediaId.c_str());
   if (sendKeyEvent(mediaId, "play"))

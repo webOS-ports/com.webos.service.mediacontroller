@@ -23,6 +23,8 @@
 bool MediaFocus::update(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs) {
   State& state = states_[mediaId];
   state.playOnItsWay = false;
+  if (!isPlaying(playStatus))
+    state.pauseOutstanding = false;
   if (playStatus == "PLAYSTATE_PLAYING") {
     if (state.playing)
       return false;
@@ -41,11 +43,13 @@ bool MediaFocus::update(const std::string& mediaId, const std::string& playStatu
 }
 
 bool MediaFocus::repause(const std::string& mediaId, std::int64_t nowMs) {
-  std::vector<std::int64_t>& at = states_[mediaId].repausedAt;
+  State& state = states_[mediaId];
+  std::vector<std::int64_t>& at = state.repausedAt;
   std::erase_if(at, [nowMs](std::int64_t t) { return nowMs - t >= kCarryOnMs; });
   if (at.size() >= kRepauseLimit)
     return false;
   at.push_back(nowMs);
+  state.pauseOutstanding = true;
   return true;
 }
 
@@ -69,19 +73,45 @@ std::vector<std::string> MediaFocus::playsAfterCall(std::int64_t nowMs) {
   return plays;
 }
 
+bool MediaFocus::pauseOutstanding(const std::string& mediaId) const {
+  auto state = states_.find(mediaId);
+  return state != states_.end() && state->second.pauseOutstanding;
+}
+
+void MediaFocus::awaitPause(const std::string& mediaId, std::int64_t nowMs) {
+  states_[mediaId].pauseAwaitedUntil = nowMs + kPauseAnswerMs;
+}
+
+bool MediaFocus::pauseAnswered(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs) {
+  auto state = states_.find(mediaId);
+  if (state == states_.end())
+    return false;
+  std::optional<std::int64_t>& until = state->second.pauseAwaitedUntil;
+  if (!until || isPlaying(playStatus))
+    return false;
+  bool inTime = nowMs < *until;
+  until.reset();
+  return inTime;
+}
+
 void MediaFocus::playSent(const std::string& mediaId) {
   states_[mediaId].playOnItsWay = true;
 }
 
 void MediaFocus::keySent(const std::string& mediaId) {
   auto state = states_.find(mediaId);
-  if (state != states_.end())
-    state->second.playOnItsWay = false;
+  if (state == states_.end())
+    return;
+  state->second.playOnItsWay = false;
+  state->second.pauseAwaitedUntil.reset();
 }
 
-bool MediaFocus::playOnItsWay(const std::string& mediaId) const {
+bool MediaFocus::playOnItsWay(const std::string& mediaId, std::int64_t nowMs) const {
   auto state = states_.find(mediaId);
-  return state != states_.end() && state->second.playOnItsWay;
+  if (state == states_.end())
+    return false;
+  const auto& until = state->second.pauseAwaitedUntil;
+  return state->second.playOnItsWay || (until && nowMs < *until);
 }
 
 void MediaFocus::forget(const std::string& mediaId) {

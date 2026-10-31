@@ -48,6 +48,9 @@ public:
   //! A play undone for a call this long before the call ends is carried
   //! out when it ends: see deferPlay().
   static constexpr std::int64_t kPlayAfterCallMs = 3000;
+  //! How long after a call's end a session still answering the pause it
+  //! was sent for the call is waited for: see awaitPause().
+  static constexpr std::int64_t kPauseAnswerMs = 1000;
 
   struct Session
   {
@@ -86,13 +89,27 @@ public:
   //! kPlayAfterCallMs before then, the first held back first. Every play
   //! held back is dropped, whether it is returned or not.
   std::vector<std::string> playsAfterCall(std::int64_t nowMs);
+  //! Whether mediaId was paused by repause() and has not said so yet. Its
+  //! status then is no word on what it does: the Music app says PAUSED some
+  //! 300 ms after the key (357 ms on 31 October 16:00:46, after the call
+  //! had ended).
+  bool pauseOutstanding(const std::string& mediaId) const;
+  //! The call has ended at nowMs with mediaId's play held back and its
+  //! pause outstanding. It is played once it says it stopped, if it does
+  //! within kPauseAnswerMs: later, a stop is a real one of its own and
+  //! does not become a play. Sent another key meanwhile, it is not played.
+  void awaitPause(const std::string& mediaId, std::int64_t nowMs);
+  //! mediaId has reported playStatus at nowMs: whether it is to be played
+  //! now, its pause having come as awaited. True once for an awaitPause().
+  bool pauseAnswered(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs);
   //! "play" was sent to mediaId as the call ended. Until it says a play
   //! status, or is sent another key, that play is on its way, and another
   //! (audiod's own, after the same call) is not sent again.
   void playSent(const std::string& mediaId);
   //! Another key was sent to mediaId.
   void keySent(const std::string& mediaId);
-  bool playOnItsWay(const std::string& mediaId) const;
+  //! Whether a play is sent or will be, within awaitPause()'s time, at nowMs.
+  bool playOnItsWay(const std::string& mediaId, std::int64_t nowMs) const;
   //! The session has gone.
   void forget(const std::string& mediaId);
   void clear();
@@ -170,6 +187,8 @@ private:
     std::optional<std::int64_t> playDeferredAt;  //!< the last deferPlay()
     std::uint64_t playDeferredOrder = 0;         //!< ... and its place in line
     bool playOnItsWay = false;   //!< playSent(), with nothing since
+    bool pauseOutstanding = false;  //!< repause()d, and has not said it stopped
+    std::optional<std::int64_t> pauseAwaitedUntil;  //!< see awaitPause()
   };
   std::map<std::string, State> states_;
   std::uint64_t deferred_ = 0;  //!< deferPlay()s so far

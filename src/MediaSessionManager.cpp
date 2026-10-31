@@ -179,11 +179,21 @@ std::string MediaSessionManager::playAfterCall(std::int64_t nowMs) {
     auto session = mapMediaSessionInfo_.find(mediaId);
     if (session == mapMediaSessionInfo_.end())
       continue;
-    if (MediaFocus::isPlaying(session->second.getPlayStatus()))
-      return std::string();
-    return mediaId;
+    if (!MediaFocus::isPlaying(session->second.getPlayStatus()))
+      return mediaId;
+    if (focus_.pauseOutstanding(mediaId)) {
+      PMLOG_INFO(CONST_MODULE_MSM, "%s %s: its pause for the call is outstanding; play held for up to %lld ms",
+                 __FUNCTION__, mediaId.c_str(), static_cast<long long>(MediaFocus::kPauseAnswerMs));
+      focus_.awaitPause(mediaId, nowMs);
+    }
+    return std::string();
   }
   return std::string();
+}
+
+bool MediaSessionManager::playAfterPause(const std::string& mediaId, const std::string& playStatus,
+                                         std::int64_t nowMs) {
+  return focus_.pauseAnswered(mediaId, playStatus, nowMs);
 }
 
 int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,

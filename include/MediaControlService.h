@@ -113,6 +113,7 @@ private:
   //! What was taken as a call was before: if the call has ended now, the
   //! sessions whose play it held back at its very end are played.
   void callMayHaveEnded(const MediaFocus::Audio& before);
+  void playAfterCall(const std::string& mediaId);
   bool sendCallKey(const std::string& keyEvent);
   static std::int64_t monotonicMs();
 

@@ -17,8 +17,12 @@
 /*-----------------------------------------------------------------------------*/
 #include "MediaFocus.h"
 
+#include <algorithm>
+#include <utility>
+
 bool MediaFocus::update(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs) {
   State& state = states_[mediaId];
+  state.playOnItsWay = false;
   if (playStatus == "PLAYSTATE_PLAYING") {
     if (state.playing)
       return false;
@@ -43,6 +47,41 @@ bool MediaFocus::repause(const std::string& mediaId, std::int64_t nowMs) {
     return false;
   at.push_back(nowMs);
   return true;
+}
+
+void MediaFocus::deferPlay(const std::string& mediaId, std::int64_t nowMs) {
+  State& state = states_[mediaId];
+  state.playDeferredAt = nowMs;
+  state.playDeferredOrder = ++deferred_;
+}
+
+std::vector<std::string> MediaFocus::playsAfterCall(std::int64_t nowMs) {
+  std::vector<std::pair<std::uint64_t, std::string>> held;
+  for (auto& [mediaId, state] : states_) {
+    if (state.playDeferredAt && nowMs - *state.playDeferredAt < kPlayAfterCallMs)
+      held.emplace_back(state.playDeferredOrder, mediaId);
+    state.playDeferredAt.reset();
+  }
+  std::sort(held.begin(), held.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+  std::vector<std::string> plays(held.size());
+  std::transform(held.begin(), held.end(), plays.begin(), [](auto& h) { return std::move(h.second); });
+  return plays;
+}
+
+void MediaFocus::playSent(const std::string& mediaId) {
+  states_[mediaId].playOnItsWay = true;
+}
+
+void MediaFocus::keySent(const std::string& mediaId) {
+  auto state = states_.find(mediaId);
+  if (state != states_.end())
+    state->second.playOnItsWay = false;
+}
+
+bool MediaFocus::playOnItsWay(const std::string& mediaId) const {
+  auto state = states_.find(mediaId);
+  return state != states_.end() && state->second.playOnItsWay;
 }
 
 void MediaFocus::forget(const std::string& mediaId) {
@@ -90,6 +129,10 @@ MediaFocus::Audio MediaFocus::withCall(Audio audio, bool callKeysHeld) {
 
 bool MediaFocus::refusesStart(const Audio& audio) {
   return audio.inCallKnown && audio.inCall;
+}
+
+bool MediaFocus::callEnded(const Audio& before, const Audio& after) {
+  return refusesStart(before) && !refusesStart(after);
 }
 
 std::vector<std::string> MediaFocus::toPause(const Session& starter, const std::vector<Session>& sessions) {

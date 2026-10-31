@@ -55,6 +55,18 @@ std::string MediaFocus::resolveKey(const std::string& keyEvent, const std::strin
   return isPlaying(playStatus) ? "pause" : "play";
 }
 
+bool MediaFocus::takesBluetoothKey(const Audio& audio) {
+  if (audio.inCallKnown && audio.inCall)
+    return false;
+  return !audio.bluetoothAudioKnown || audio.bluetoothAudio;
+}
+
+bool MediaFocus::takesKey(const Audio& audio, const std::string& key) {
+  if (!audio.inCallKnown || !audio.inCall)
+    return true;
+  return key == "pause" || key == "stop";
+}
+
 std::vector<std::string> MediaFocus::toPause(const Session& starter, const std::vector<Session>& sessions) {
   std::vector<std::string> paused;
   for (const auto& session : sessions) {

@@ -80,10 +80,12 @@ TEST_F(Lifecycle, RegistersTheServiceAndItsMethods)
               + 1
 #endif
     );
-    // follows bluetooth2 from the start, and nothing else yet
-    ASSERT_EQ(fakebus::openCalls().size(), 1u);
+    // follows bluetooth2 and audiod from the start, and nothing else yet
+    ASSERT_EQ(fakebus::openCalls().size(), 2u);
     EXPECT_EQ(fakebus::openCalls()[0].uri, uri::serverStatus);
     EXPECT_EQ(json(fakebus::openCalls()[0].payload)["serviceName"].asString(), "com.webos.service.bluetooth2");
+    EXPECT_EQ(fakebus::openCalls()[1].uri, uri::serverStatus);
+    EXPECT_EQ(json(fakebus::openCalls()[1].payload)["serviceName"].asString(), "com.palm.audio");
 }
 
 TEST_F(Lifecycle, ApiFilesListWhatIsRegistered)
@@ -104,7 +106,9 @@ TEST_F(Lifecycle, PermissionsCoverTheCallsMade)
         std::set<std::string> groups;
         for (int i = 0; i < perm["com.webos.service.mediacontroller"].arraySize(); i++)
             groups.insert(perm["com.webos.service.mediacontroller"][i].asString());
-        EXPECT_EQ(groups, (std::set<std::string>{"bluetooth.query", "bluetooth.management"})) << acg;
+        // bluetooth2's, and audiod's getStatus (audio.query)
+        EXPECT_EQ(groups, (std::set<std::string>{"bluetooth.query", "bluetooth.management",
+                                                 "audio.query"})) << acg;
 
         // Every client of the service is replied to - web apps, QML apps
         // under "<appId>-<pid>" names, audiod, luna-send - and bluetooth2

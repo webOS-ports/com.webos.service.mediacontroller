@@ -104,12 +104,12 @@ protected:
     //! bluetooth2 is up.
     void up()
     {
-        ASSERT_TRUE(fakebus::deliver(openCall(uri::serverStatus),
+        ASSERT_TRUE(fakebus::deliver(serverStatusFor("com.webos.service.bluetooth2"),
             "{\"returnValue\":true,\"connected\":true,\"serviceName\":\"com.webos.service.bluetooth2\"}"));
     }
     void down()
     {
-        ASSERT_TRUE(fakebus::deliver(openCall(uri::serverStatus),
+        ASSERT_TRUE(fakebus::deliver(serverStatusFor("com.webos.service.bluetooth2"),
             "{\"returnValue\":true,\"connected\":false,\"serviceName\":\"com.webos.service.bluetooth2\"}"));
     }
 
@@ -366,6 +366,100 @@ TEST_F(Bluetooth, PlayStatesMapToAvrcp)
     size_t before = notified().size();
     call("setMediaPlayStatus", "{\"mediaId\":\"m1\",\"playStatus\":\"PLAYSTATE_BUFFERING\"}");
     EXPECT_EQ(notified().size(), before) << "buffering was sent";
+}
+
+TEST_F(Bluetooth, AudiodIsFollowedAndForgottenWhenItGoes)
+{
+    start();
+    EXPECT_TRUE(fakebus::openCalls(uri::audiodStatus).empty()) << "not before audiod is up";
+    audiodUp();
+    LSMessageToken first = openCall(uri::audiodStatus);
+    EXPECT_TRUE(json(fakebus::openCalls(uri::audiodStatus)[0].payload)["subscribe"].asBool());
+    audiodUp();  // said twice, subscribed once
+    EXPECT_EQ(fakebus::openCalls(uri::audiodStatus).size(), 1u);
+    audiodUp(false);
+    EXPECT_TRUE(fakebus::openCalls(uri::audiodStatus).empty()) << "cancelled when audiod goes";
+    audiodUp();
+    EXPECT_NE(openCall(uri::audiodStatus), first);
+    EXPECT_EQ(made(uri::audiodStatus), 2u);
+}
+
+std::vector<std::string> sentKeys(const std::string& token)
+{
+    std::vector<std::string> sent;
+    for (const std::string& r : fakebus::repliesTo(token)) {
+        if (json(r).hasKey("keyEvent"))
+            sent.push_back(json(r)["keyEvent"].asString());
+    }
+    return sent;
+}
+
+TEST_F(Bluetooth, AHeadsetsTapDuringACallStartsNothing)
+{
+    // 31 October 05:49:42: the Nuraphone tapped in a call sent AVRCP play,
+    // and the Music app started playing over the call.
+    start();
+    std::string music = session("music", "org.webosports.app.music");
+    headsetConnected();
+    audiod(0, 1);
+    LSMessageToken keys = openCall(uri::passThrough);
+    // the call is up, wherever audiod says the media would go
+    for (int bluetoothAudio : {1, 0}) {
+        audiod(1, bluetoothAudio);
+        for (const char* code : {"play", "pause", "next"}) {
+            fakebus::deliver(keys, key(kAdapterA, kHeadset, code, "pressed"));
+            fakebus::deliver(keys, key(kAdapterA, kHeadset, code, "released"));
+        }
+    }
+    EXPECT_TRUE(sentKeys(music).empty());
+    // and after it, the headset's keys work again
+    audiod(0, 1);
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "play", "released"));
+    EXPECT_EQ(sentKeys(music), std::vector<std::string>{"play"});
+}
+
+TEST_F(Bluetooth, AHeadsetThatIsNotTheOutputPausesNothing)
+{
+    // B08-1: headphones plugged in take the music; the headset, its stream
+    // gone, sends PAUSE by itself. B08-5: taken off while the music plays
+    // in the headphones, it sends PAUSE.
+    start();
+    std::string music = session("music", "org.webosports.app.music");
+    headsetConnected();
+    LSMessageToken keys = openCall(uri::passThrough);
+    audiod(0, 0);
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "pause", "pressed"));
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "pause", "released"));
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "play", "released"));
+    EXPECT_TRUE(sentKeys(music).empty());
+
+    // The headset is the output: taking it off pauses, as it should.
+    audiod(0, 1);
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "pause", "pressed"));
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "pause", "released"));
+    EXPECT_EQ(sentKeys(music), std::vector<std::string>{"pause"});
+}
+
+TEST_F(Bluetooth, WithoutWordFromAudiodTheKeysGoAsBefore)
+{
+    start();
+    std::string music = session("music", "org.webosports.app.music");
+    headsetConnected();
+    LSMessageToken keys = openCall(uri::passThrough);
+    // audiod not up yet
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "pause", "released"));
+    // an audiod that sends neither field
+    audiod(-1, -1);
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "play", "released"));
+    // what a gone audiod said is forgotten
+    audiod(1, 0);
+    audiodUp(false);
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "pause", "released"));
+    // and so is what a failed subscription said
+    audiod(1, 0);
+    fakebus::deliver(openCall(uri::audiodStatus), kError);
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "play", "released"));
+    EXPECT_EQ(sentKeys(music), (std::vector<std::string>{"pause", "play", "pause", "play"}));
 }
 
 } // namespace

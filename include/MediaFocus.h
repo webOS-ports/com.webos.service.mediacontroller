@@ -71,6 +71,34 @@ public:
   //! key is sent as it is.
   static std::string resolveKey(const std::string& keyEvent, const std::string& playStatus);
 
+  /**
+   * What audiod (com.palm.audio/getStatus) says about calls and where the
+   * sound goes. Each field counts only once audiod has said it: before
+   * that, and while audiod is down, the keys go as they always did.
+   */
+  struct Audio
+  {
+    bool inCallKnown = false;
+    bool inCall = false;               //!< a call is up (carrier or VoIP)
+    bool bluetoothAudioKnown = false;
+    bool bluetoothAudio = false;       //!< a Bluetooth headset is the output
+  };
+
+  //! Whether a Bluetooth headset's key (AVRCP passthrough) goes to a
+  //! session. Not during a call: a tap on the headset is meant for the call,
+  //! and on Android Telecom's exclusive session swallows every media key
+  //! then. Not while the sound goes elsewhere (headphones in the jack, the
+  //! speaker): a headset sends PAUSE by itself when it is taken off or its
+  //! stream stops, and that must not pause music it no longer plays, as
+  //! Android drops passthrough from a device that is not the active one.
+  static bool takesBluetoothKey(const Audio& audio);
+
+  //! Whether key, as resolved, goes to a session from injectMediaKeyEvent
+  //! (the shell's hardware keys, audiod). During a call only "pause" and
+  //! "stop": audiod pauses the media for the call with them, and nothing
+  //! is started while the call is up.
+  static bool takesKey(const Audio& audio, const std::string& key);
+
 private:
   struct State
   {

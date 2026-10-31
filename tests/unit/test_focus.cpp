@@ -137,6 +137,46 @@ TEST(Focus, OtherKeysGoAsTheyAre)
         EXPECT_EQ(MediaFocus::resolveKey(key, kPlaying), key);
 }
 
+MediaFocus::Audio audio(int inCall, int bluetoothAudio)
+{
+    MediaFocus::Audio a;
+    a.inCallKnown = inCall >= 0;
+    a.inCall = inCall > 0;
+    a.bluetoothAudioKnown = bluetoothAudio >= 0;
+    a.bluetoothAudio = bluetoothAudio > 0;
+    return a;
+}
+
+TEST(Focus, AHeadsetsKeysCountOnlyWhileItIsTheOutputAndNoCallIsUp)
+{
+    // audiod has said nothing (yet, or it is down, or it is older): as before
+    EXPECT_TRUE(MediaFocus::takesBluetoothKey(audio(-1, -1)));
+    // the headset is the output: taking it off pauses, as AirPods do
+    EXPECT_TRUE(MediaFocus::takesBluetoothKey(audio(0, 1)));
+    EXPECT_TRUE(MediaFocus::takesBluetoothKey(audio(-1, 1)));
+    // the sound went to the jack or the speaker (B08-1, B08-5)
+    EXPECT_FALSE(MediaFocus::takesBluetoothKey(audio(0, 0)));
+    EXPECT_FALSE(MediaFocus::takesBluetoothKey(audio(-1, 0)));
+    // a call is up, wherever the sound goes (31 October 05:49:42)
+    EXPECT_FALSE(MediaFocus::takesBluetoothKey(audio(1, 1)));
+    EXPECT_FALSE(MediaFocus::takesBluetoothKey(audio(1, 0)));
+    EXPECT_FALSE(MediaFocus::takesBluetoothKey(audio(1, -1)));
+    // and only inCall true is a call
+    EXPECT_TRUE(MediaFocus::takesBluetoothKey(audio(0, -1)));
+}
+
+TEST(Focus, DuringACallOnlyPauseAndStopGoThrough)
+{
+    for (const char* key : {"pause", "stop"})
+        EXPECT_TRUE(MediaFocus::takesKey(audio(1, 0), key)) << key;
+    for (const char* key : {"play", "next", "previous", "playPause", ""})
+        EXPECT_FALSE(MediaFocus::takesKey(audio(1, 1), key)) << key;
+    for (const char* key : {"play", "pause", "stop", "next", "previous"}) {
+        EXPECT_TRUE(MediaFocus::takesKey(audio(0, 0), key)) << key;
+        EXPECT_TRUE(MediaFocus::takesKey(audio(-1, -1), key)) << key;
+    }
+}
+
 // Through the service.
 
 typedef McsTest FocusService;
@@ -282,6 +322,33 @@ TEST_F(FocusService, TheHeadsetButtonPausesWhatPlaysAndPlaysWhatIsPaused)
     EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"playPause\"}")));
     EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"next\"}")));
     EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "play", "next"}));
+}
+
+TEST_F(FocusService, NothingIsStartedDuringACallButAudiodsPauseGoesThrough)
+{
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    status(this, "music", kPlaying);
+    audiod(1, 0);
+    // audiod pauses the media for the call with injectMediaKeyEvent
+    EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"pause\"}")));
+    status(this, "music", kPaused);
+    // the wired headset's button, play and next start nothing now
+    for (const char* key : {"playPause", "play", "next", "previous"}) {
+        std::string reply = call("injectMediaKeyEvent",
+                                 std::string("{\"displayId\":0,\"keyEvent\":\"") + key + "\"}");
+        EXPECT_FALSE(returnValue(reply)) << key;
+        EXPECT_EQ(errorCode(reply), MCS_ERROR_IN_CALL) << key;
+    }
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause"}));
+    // a session playing anyway is still paused by the button
+    status(this, "music", kPlaying);
+    EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"playPause\"}")));
+    status(this, "music", kPaused);
+    // the call over, audiod's play resumes it
+    audiod(0, 0);
+    EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"play\"}")));
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "pause", "play"}));
 }
 
 } // namespace

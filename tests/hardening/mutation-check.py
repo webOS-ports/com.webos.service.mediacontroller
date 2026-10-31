@@ -3,7 +3,7 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 #
-# mutation-check.py [--work DIR] <corei7-64 recipe workdir>
+# mutation-check.py [--work DIR] [--only NAME...] <corei7-64 recipe workdir>
 #
 # Shows the tests can fail: each mutant below puts back one fault the
 # service had, or could have, in a copy of the tree, and the ASan+UBSan
@@ -17,6 +17,7 @@ import argparse, os, shutil, subprocess, sys
 
 ap = argparse.ArgumentParser()
 ap.add_argument("--work", default=os.path.expanduser("~/claude-scratch/mediacontroller/mutants"))
+ap.add_argument("--only", nargs="+", default=[], help="run only the mutants named")
 ap.add_argument("workdir")
 opts = ap.parse_args()
 sys.stdout.reconfigure(line_buffering=True)
@@ -222,8 +223,8 @@ MUTANTS = [
      '  return key == "pause" || key == "stop";', "  return true;",
      "Focus.DuringACallOnlyPauseAndStopGoThrough"),
     ("gone-audiod-remembered", MCS,
-     "    obj->cancelCall(obj->audiodStatusToken_);\n    obj->audio_ = MediaFocus::Audio();\n",
-     "    obj->cancelCall(obj->audiodStatusToken_);\n",
+     "    MediaFocus::Audio before = obj->audio();\n    obj->audio_ = MediaFocus::Audio();\n    obj->callMayHaveEnded(before);\n  }\n  return true;",
+     "    MediaFocus::Audio before = obj->audio();\n    obj->callMayHaveEnded(before);\n  }\n  return true;",
      "Bluetooth.WithoutWordFromAudiodTheKeysGoAsBefore"),
     ("audiod-subscribed-every-time", MCS,
      "  if (audiodStatusToken_ != LSMESSAGE_TOKEN_INVALID)\n    return;\n", "",
@@ -232,8 +233,8 @@ MUTANTS = [
      "    obj->cancelCall(obj->audiodStatusToken_);\n", "",
      "Bluetooth.AudiodIsFollowedAndForgottenWhenItGoes"),
     ("failed-audiod-status-remembered", MCS,
-     "      obj->audiodStatusToken_ = LSMESSAGE_TOKEN_INVALID;\n      obj->audio_ = MediaFocus::Audio();\n",
-     "      obj->audiodStatusToken_ = LSMESSAGE_TOKEN_INVALID;\n",
+     "      MediaFocus::Audio before = obj->audio();\n      obj->audio_ = MediaFocus::Audio();\n",
+     "      MediaFocus::Audio before = obj->audio();\n",
      "Bluetooth.WithoutWordFromAudiodTheKeysGoAsBefore"),
     # The wired headset's button is the call's while the Phone app holds
     # registerCallKeys, and media starting during a call is paused again.
@@ -267,7 +268,8 @@ MUTANTS = [
      "  MediaFocus::Audio audio = obj->audio();", "  MediaFocus::Audio audio = obj->audio_;",
      "Bluetooth.AHeadsetsTapWhileACallRingsStartsNothing"),
     ("starts-during-a-call-allowed", FOCUS,
-     "  return audio.inCallKnown && audio.inCall;\n}\n\nstd::vector", "  return false;\n}\n\nstd::vector",
+     "bool MediaFocus::refusesStart(const Audio& audio) {\n  return audio.inCallKnown && audio.inCall;\n",
+     "bool MediaFocus::refusesStart(const Audio& audio) {\n  return false;\n",
      "CallKeysService.ASessionStartingDuringACallIsPausedAndTakesNothing"),
     ("refused-start-not-paused", MCS,
      "  if (refused) {", "  if (false) {",
@@ -287,6 +289,64 @@ MUTANTS = [
     ("repauses-never-age", FOCUS,
      "  std::erase_if(at, [nowMs](std::int64_t t) { return nowMs - t >= kCarryOnMs; });\n", "",
      "CallKeys.RepausesAreCountedPerSessionWithinTheCarryOnTime"),
+
+    # A play held back for the end of the call (31 October 13:23: the music
+    # stayed paused after a rejected call).
+    ("nothing-played-after-the-call", MCS,
+     "  if (!MediaFocus::callEnded(before, audio()))\n    return;\n", "  return;\n",
+     "CallKeysService.MusicPlaysOnAfterARejectedCall"),
+    ("repause-not-held-back", MSM,
+     "    focus_.deferPlay(mediaId, nowMs);\n    refused = true;\n", "    refused = true;\n",
+     "CallKeysService.MusicPlaysOnAfterARejectedCall"),
+    ("refused-play-key-not-held-back", MCS,
+     "    if (key == \"play\")\n      mediaSessionMgr_.deferPlay", "    if (false)\n      mediaSessionMgr_.deferPlay",
+     "CallKeysService.AudiodsPlayAfterTheCallIsCarriedOut"),
+    ("every-refused-key-held-back", MCS,
+     "    if (key == \"play\")\n      mediaSessionMgr_.deferPlay", "    if (true)\n      mediaSessionMgr_.deferPlay",
+     "CallKeysService.AKeyRefusedOtherThanPlayIsNotCarriedOut"),
+    ("held-back-plays-never-expire", FOCUS,
+     "    if (state.playDeferredAt && nowMs - *state.playDeferredAt < kPlayAfterCallMs)\n",
+     "    if (state.playDeferredAt)\n",
+     "CallKeysService.APlayEarlierInTheCallIsNotCarriedOutAfterIt"),
+    ("held-back-window-inclusive", FOCUS,
+     "nowMs - *state.playDeferredAt < kPlayAfterCallMs", "nowMs - *state.playDeferredAt <= kPlayAfterCallMs",
+     "CallKeysService.APlayEarlierInTheCallIsNotCarriedOutAfterIt"),
+    ("held-back-plays-kept-after-the-call", FOCUS,
+     "    state.playDeferredAt.reset();\n", "",
+     "CallKeys.APlayHeldBackIsCarriedOutOnlyIfTheCallEndsSoonAfter"),
+    ("any-change-ends-the-call", FOCUS,
+     "  return refusesStart(before) && !refusesStart(after);\n", "  return !refusesStart(after);\n",
+     "CallKeys.ACallEndsWhenTheLastOfAudiodsCallAndTheHeldKeysGoes"),
+    ("keys-let-go-no-end", MCS,
+     "    obj->callKeyClients_.erase(client);\n    obj->callMayHaveEnded(before);\n",
+     "    obj->callKeyClients_.erase(client);\n",
+     "CallKeysService.MusicPlaysOnAfterARejectedCall"),
+    ("audiods-end-no-end", MCS,
+     "  obj->audio_ = audio;\n  obj->callMayHaveEnded(before);\n", "  obj->audio_ = audio;\n",
+     "CallKeysService.OnlyTheEndOfTheLastCallPlays"),
+    ("audiod-down-no-end", MCS,
+     "    MediaFocus::Audio before = obj->audio();\n    obj->audio_ = MediaFocus::Audio();\n    obj->callMayHaveEnded(before);\n",
+     "    obj->audio_ = MediaFocus::Audio();\n",
+     "CallKeysService.AudiodGoingDownEndsItsCall"),
+    ("playing-session-played-again", MSM,
+     "    if (MediaFocus::isPlaying(session->second.getPlayStatus()))\n      return std::string();\n", "",
+     "CallKeysService.NothingIsPlayedThatPlaysAlreadyOrHasGone"),
+    ("last-held-back-played", FOCUS,
+     "[](const auto& a, const auto& b) { return a.first < b.first; }",
+     "[](const auto& a, const auto& b) { return a.first > b.first; }",
+     "CallKeysService.OnlyTheFirstHeldBackPlaysNotItsEcho"),
+    ("held-back-in-name-order", FOCUS,
+     "  state.playDeferredOrder = ++deferred_;\n", "",
+     "CallKeys.APlayHeldBackIsCarriedOutOnlyIfTheCallEndsSoonAfter"),
+    ("play-sent-twice", MCS,
+     "  if (key == \"play\" && mediaSessionMgr_.playOnItsWay(mediaId)) {", "  if (false) {",
+     "CallKeysService.AudiodsPlayAfterTheEndIsNotSentTwice"),
+    ("play-on-its-way-past-a-status", FOCUS,
+     "  state.playOnItsWay = false;\n", "",
+     "CallKeysService.AudiodsPlayAfterTheEndIsNotSentTwice"),
+    ("play-on-its-way-past-a-key", MCS,
+     "  mediaSessionMgr_.keySent(mediaId);\n", "",
+     "CallKeysService.AudiodsPlayAfterTheEndIsNotSentTwice"),
 ]
 
 S = os.path.join(opts.workdir, "recipe-sysroot")
@@ -358,6 +418,8 @@ if rc != 0:
 print("ok   unmutated tree passes")
 
 for name, path, old, new, catcher in MUTANTS:
+    if opts.only and name not in opts.only:
+        continue
     rc, out = build_and_run(name, (path, old, new))
     if rc is None:
         print("FAIL %-38s %s" % (name, out))

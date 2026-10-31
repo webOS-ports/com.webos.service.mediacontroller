@@ -24,6 +24,7 @@
 #include <glib.h>
 #include <pbnjson.hpp>
 
+#include <cstdint>
 #include <map>
 #include <vector>
 #include <string>
@@ -55,6 +56,11 @@ public:
 
   bool start(GMainLoop *loop);
   void stop();
+
+  //! The monotonic clock in milliseconds the service goes by; the tests
+  //! set their own.
+  using Clock = std::int64_t (*)();
+  void setClock(Clock clock) { clock_ = clock; }
 
   bool registerMediaSession(LSMessage &);
   bool unregisterMediaSession(LSMessage &);
@@ -104,9 +110,14 @@ private:
                              pbnjson::JValue payload);
   void releaseSessionClient(const std::string& mediaId);
   MediaFocus::Audio audio() const;
+  //! What was taken as a call was before: if the call has ended now, the
+  //! sessions whose play it held back at its very end are played.
+  void callMayHaveEnded(const MediaFocus::Audio& before);
   bool sendCallKey(const std::string& keyEvent);
+  static std::int64_t monotonicMs();
 
   LSHandle *lsHandle_ = nullptr;
+  Clock clock_ = &MediaControlService::monotonicMs;
   MediaSessionManager mediaSessionMgr_;
   MediaControlPrivate mediaControlPrivate_;
 

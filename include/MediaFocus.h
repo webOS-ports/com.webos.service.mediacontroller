@@ -41,6 +41,9 @@ class MediaFocus
 {
 public:
   static constexpr std::int64_t kCarryOnMs = 2000;
+  //! At most this many pauses for one session within kCarryOnMs during a
+  //! call (refusesStart): see repause().
+  static constexpr unsigned kRepauseLimit = 5;
 
   struct Session
   {
@@ -53,6 +56,13 @@ public:
   //! Notes mediaId's playStatus, reported at nowMs (a monotonic clock in
   //! milliseconds); true when it is a start.
   bool update(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs);
+  //! During a call, mediaId plays where it did not (whether a start or a
+  //! carry-on: the user pressing play again a second after it was paused
+  //! is a carry-on): true when it is to be paused again, and noted as
+  //! paused at nowMs. False once it has been paused kRepauseLimit times
+  //! within kCarryOnMs: an app that answers every pause by playing again
+  //! is let play, rather than kept in a pause/play loop with it.
+  bool repause(const std::string& mediaId, std::int64_t nowMs);
   //! The session has gone.
   void forget(const std::string& mediaId);
   void clear();
@@ -122,6 +132,7 @@ private:
     bool playing = false;
     bool stopped = false;        //!< has played and stopped
     std::int64_t stoppedAt = 0;  //!< when, if it has
+    std::vector<std::int64_t> repausedAt;  //!< repause()s within kCarryOnMs
   };
   std::map<std::string, State> states_;
 };

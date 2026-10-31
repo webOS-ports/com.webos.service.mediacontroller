@@ -341,14 +341,14 @@ TEST_F(FocusService, NothingIsStartedDuringACallButAudiodsPauseGoesThrough)
         EXPECT_EQ(errorCode(reply), MCS_ERROR_IN_CALL) << key;
     }
     EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause"}));
-    // a session playing anyway is still paused by the button
+    // a session playing anyway is paused at once, and by the button too
     status(this, "music", kPlaying);
     EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"playPause\"}")));
     status(this, "music", kPaused);
     // the call over, audiod's play resumes it
     audiod(0, 0);
     EXPECT_TRUE(returnValue(call("injectMediaKeyEvent", "{\"displayId\":0,\"keyEvent\":\"play\"}")));
-    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "pause", "play"}));
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "pause", "pause", "play"}));
 }
 
 } // namespace

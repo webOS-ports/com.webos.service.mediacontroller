@@ -36,6 +36,15 @@ bool MediaFocus::update(const std::string& mediaId, const std::string& playStatu
   return false;
 }
 
+bool MediaFocus::repause(const std::string& mediaId, std::int64_t nowMs) {
+  std::vector<std::int64_t>& at = states_[mediaId].repausedAt;
+  std::erase_if(at, [nowMs](std::int64_t t) { return nowMs - t >= kCarryOnMs; });
+  if (at.size() >= kRepauseLimit)
+    return false;
+  at.push_back(nowMs);
+  return true;
+}
+
 void MediaFocus::forget(const std::string& mediaId) {
   states_.erase(mediaId);
 }

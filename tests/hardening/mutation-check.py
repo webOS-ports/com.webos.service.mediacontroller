@@ -275,6 +275,18 @@ MUTANTS = [
     ("refused-start-takes-the-keys", MSM,
      "    refused = true;\n    return MCS_ERROR_NO_ERROR;\n", "    refused = true;\n",
      "CallKeysService.ASessionStartingDuringACallIsPausedAndTakesNothing"),
+    ("only-a-start-repaused", MSM,
+     "    if (!MediaFocus::isPlaying(playStatus) || wasPlaying)\n", "    if (!started)\n",
+     "CallKeysService.EveryPlayDuringACallIsPausedNotJustTheFirst"),
+    ("playing-again-repaused", MSM,
+     "    if (!MediaFocus::isPlaying(playStatus) || wasPlaying)\n", "    if (!MediaFocus::isPlaying(playStatus))\n",
+     "CallKeysService.EveryPlayDuringACallIsPausedNotJustTheFirst"),
+    ("repause-loops-forever", FOCUS,
+     "  if (at.size() >= kRepauseLimit)\n    return false;\n", "",
+     "CallKeysService.AnAppThatPlaysOnAfterEveryPauseIsNotLooped"),
+    ("repauses-never-age", FOCUS,
+     "  std::erase_if(at, [nowMs](std::int64_t t) { return nowMs - t >= kCarryOnMs; });\n", "",
+     "CallKeys.RepausesAreCountedPerSessionWithinTheCarryOnTime"),
 ]
 
 S = os.path.join(opts.workdir, "recipe-sysroot")

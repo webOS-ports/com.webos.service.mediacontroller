@@ -184,15 +184,28 @@ int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,
   mediaSession *session = find(mediaId, __FUNCTION__);
   if (!session)
     return MCS_ERROR_INVALID_MEDIAID;
+  bool wasPlaying = MediaFocus::isPlaying(session->getPlayStatus());
   session->setPlayStatus(playStatus);
-  if (!focus_.update(mediaId, playStatus, nowMs))
-    return MCS_ERROR_NO_ERROR;
+  bool started = focus_.update(mediaId, playStatus, nowMs);
   if (refuseStart) {
-    //during a call: it is paused again, and takes neither the keys nor the others' place
+    /* During a call it is paused again, and takes neither the keys nor the
+     * others' place - every time it plays where it did not, started or
+     * carrying on, whoever asked it to (its own play button, its
+     * dashboard, a key). */
+    if (!MediaFocus::isPlaying(playStatus) || wasPlaying)
+      return MCS_ERROR_NO_ERROR;
+    if (!focus_.repause(mediaId, nowMs)) {
+      PMLOG_ERROR(CONST_MODULE_MSM, "%s %s plays on during a call: paused %u times within %lld ms",
+                    __FUNCTION__, mediaId.c_str(), MediaFocus::kRepauseLimit,
+                    static_cast<long long>(MediaFocus::kCarryOnMs));
+      return MCS_ERROR_NO_ERROR;
+    }
     PMLOG_INFO(CONST_MODULE_MSM, "%s %s started playing during a call", __FUNCTION__, mediaId.c_str());
     refused = true;
     return MCS_ERROR_NO_ERROR;
   }
+  if (!started)
+    return MCS_ERROR_NO_ERROR;
 
   //a start: the keys go to it, and the others playing stop
   PMLOG_INFO(CONST_MODULE_MSM, "%s %s started playing", __FUNCTION__, mediaId.c_str());

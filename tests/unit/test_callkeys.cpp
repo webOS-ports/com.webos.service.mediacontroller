@@ -238,6 +238,66 @@ TEST_F(CallKeysService, ASessionStartingDuringACallIsPausedAndTakesNothing)
     EXPECT_EQ(keyEvents(video).size(), 1u);
 }
 
+TEST_F(CallKeysService, EveryPlayDuringACallIsPausedNotJustTheFirst)
+{
+    // MK-2, 31 October 10:02:47: the Music app paused for the call was
+    // played again from its own controls 0.8 s after the pause, and again
+    // 0.1 s after the user paused it: within the carry-on time, so not a
+    // start, and it played on through the call.
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    audiod(1, 0);
+    // kept below kRepauseLimit, which would hide a pause too many
+    static_assert(MediaFocus::kRepauseLimit >= 5);
+    for (int i = 0; i < 3; i++) {
+        status("music", kPlaying);
+        status("music", kPaused);
+    }
+    EXPECT_EQ(keyEvents(music), (std::vector<std::string>{"pause", "pause", "pause"}));
+    // buffering is about to play: paused as well
+    call("setMediaPlayStatus", "{\"mediaId\":\"music\",\"playStatus\":\"PLAYSTATE_BUFFERING\"}", app(":1.1"));
+    EXPECT_EQ(keyEvents(music).size(), 4u);
+    // what it reports while it already plays is not another play
+    status("music", kPlaying);
+    status("music", kPlaying);
+    EXPECT_EQ(keyEvents(music).size(), 4u);
+}
+
+TEST_F(CallKeysService, AnAppThatPlaysOnAfterEveryPauseIsNotLooped)
+{
+    // An app answering each pause by playing again would be paused back
+    // and forth without end; after kRepauseLimit pauses within the
+    // carry-on time it is let play.
+    start();
+    std::string music = session("music", "com.music", app(":1.1"));
+    std::string calls = phone();
+    for (unsigned i = 0; i < MediaFocus::kRepauseLimit + 3; i++) {
+        status("music", kPlaying);
+        status("music", kPaused);
+    }
+    EXPECT_EQ(keyEvents(music).size(), MediaFocus::kRepauseLimit);
+    // and the limit is its own: another session is still paused
+    std::string video = session("video", "com.atlas", app(":1.2"), false);
+    status("video", kPlaying);
+    EXPECT_EQ(keyEvents(video), std::vector<std::string>{"pause"});
+}
+
+TEST(CallKeys, RepausesAreCountedPerSessionWithinTheCarryOnTime)
+{
+    MediaFocus focus;
+    for (unsigned i = 0; i < MediaFocus::kRepauseLimit; i++)
+        EXPECT_TRUE(focus.repause("m", 1000 + i)) << i;
+    EXPECT_FALSE(focus.repause("m", 1100));
+    EXPECT_TRUE(focus.repause("other", 1100));
+    // the oldest out of the window makes room again
+    EXPECT_FALSE(focus.repause("m", 1000 + MediaFocus::kCarryOnMs - 1));
+    EXPECT_TRUE(focus.repause("m", 1000 + MediaFocus::kCarryOnMs));
+    EXPECT_FALSE(focus.repause("m", 1000 + MediaFocus::kCarryOnMs));
+    // a session gone starts afresh
+    focus.forget("m");
+    EXPECT_TRUE(focus.repause("m", 1100));
+}
+
 TEST_F(CallKeysService, ASessionStartingWhileACallRingsIsPaused)
 {
     // audiod says nothing of a call that only rings; the Phone app's hold does

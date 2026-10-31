@@ -67,6 +67,22 @@ bool MediaFocus::takesKey(const Audio& audio, const std::string& key) {
   return key == "pause" || key == "stop";
 }
 
+bool MediaFocus::isCallKey(const std::string& keyEvent) {
+  return keyEvent == "playPause" || keyEvent == "hold";
+}
+
+MediaFocus::Audio MediaFocus::withCall(Audio audio, bool callKeysHeld) {
+  if (callKeysHeld) {
+    audio.inCallKnown = true;
+    audio.inCall = true;
+  }
+  return audio;
+}
+
+bool MediaFocus::refusesStart(const Audio& audio) {
+  return audio.inCallKnown && audio.inCall;
+}
+
 std::vector<std::string> MediaFocus::toPause(const Session& starter, const std::vector<Session>& sessions) {
   std::vector<std::string> paused;
   for (const auto& session : sessions) {

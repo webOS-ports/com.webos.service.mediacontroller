@@ -418,6 +418,28 @@ TEST_F(Bluetooth, AHeadsetsTapDuringACallStartsNothing)
     EXPECT_EQ(sentKeys(music), std::vector<std::string>{"play"});
 }
 
+TEST_F(Bluetooth, AHeadsetsTapWhileACallRingsStartsNothing)
+{
+    // audiod says nothing of a call that only rings; the Phone app holds
+    // registerCallKeys from then on. A Bluetooth headset's keys stay off
+    // the call: they are neither the call's nor the music's.
+    start();
+    std::string music = session("music", "org.webosports.app.music");
+    headsetConnected();
+    audiod(0, 1);
+    LSMessageToken keys = openCall(uri::passThrough);
+    std::string reply = call("registerCallKeys", "{\"subscribe\":true}");
+    ASSERT_TRUE(returnValue(reply)) << reply;
+    std::string calls = fakebus::lastToken();
+    for (const char* code : {"play", "pause", "next"})
+        fakebus::deliver(keys, key(kAdapterA, kHeadset, code, "released"));
+    EXPECT_TRUE(sentKeys(music).empty());
+    EXPECT_TRUE(sentKeys(calls).empty()) << "an AVRCP key went to the call";
+    EXPECT_TRUE(fakebus::cancel(calls));
+    fakebus::deliver(keys, key(kAdapterA, kHeadset, "play", "released"));
+    EXPECT_EQ(sentKeys(music), std::vector<std::string>{"play"});
+}
+
 TEST_F(Bluetooth, AHeadsetThatIsNotTheOutputPausesNothing)
 {
     // B08-1: headphones plugged in take the music; the headset, its stream

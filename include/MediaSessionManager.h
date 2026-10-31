@@ -73,11 +73,15 @@ public:
                      const std::vector<std::string>& mediaAction);
   //! Records playStatus, reported at nowMs (monotonic, milliseconds).
   //! When it starts mediaId playing (see MediaFocus) the session becomes
-  //! the active one, and toPause gets the sessions it stops.
+  //! the active one, and toPause gets the sessions it stops - unless
+  //! refuseStart (a call is up): then refused is set, and the start leaves
+  //! the active session and the others as they were.
   int setMediaPlayStatus(const std::string& mediaId,
                          const std::string& playStatus,
                          std::int64_t nowMs,
-                         std::vector<std::string>& toPause);
+                         bool refuseStart,
+                         std::vector<std::string>& toPause,
+                         bool& refused);
   int setMediaMuteStatus(const std::string& mediaId,
                          const std::string& muteStatus);
   int setMediaPlayPosition(const std::string& mediaId,

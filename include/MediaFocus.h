@@ -99,6 +99,23 @@ public:
   //! is started while the call is up.
   static bool takesKey(const Audio& audio, const std::string& key);
 
+  //! The keys that are the call's while the Phone app holds
+  //! registerCallKeys: the wired headset's button, which the shell sends
+  //! as "playPause" (a press) and "hold" (a long press). Nothing else sends
+  //! these two: audiod sends "pause" and "play", and a Bluetooth headset's
+  //! keys come by AVRCP, not through injectMediaKeyEvent.
+  static bool isCallKey(const std::string& keyEvent);
+
+  //! audio, with a call taken as up while the Phone app holds
+  //! registerCallKeys: it does from the moment a call rings until the last
+  //! call ends, and audiod says nothing of a call that only rings.
+  static Audio withCall(Audio audio, bool callKeysHeld);
+
+  //! Whether a session that starts playing is paused again, and leaves
+  //! the keys and the other sessions as they were: during a call, as on
+  //! Android, where no media gets focus while a call holds it.
+  static bool refusesStart(const Audio& audio);
+
 private:
   struct State
   {

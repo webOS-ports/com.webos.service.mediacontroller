@@ -172,10 +172,13 @@ int MediaSessionManager::setMediaAction(const std::string& mediaId,
 int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,
                                             const std::string& playStatus,
                                             std::int64_t nowMs,
-                                            std::vector<std::string>& toPause) {
+                                            bool refuseStart,
+                                            std::vector<std::string>& toPause,
+                                            bool& refused) {
   PMLOG_INFO(CONST_MODULE_MSM, "%s mediaId : %s playStatus : %s", __FUNCTION__,
              mediaId.c_str(), playStatus.c_str());
   toPause.clear();
+  refused = false;
   if (!validatePlayStatus(playStatus))
     return MCS_ERROR_SESSION_INVALID_PLAY_STATE;
   mediaSession *session = find(mediaId, __FUNCTION__);
@@ -184,6 +187,12 @@ int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,
   session->setPlayStatus(playStatus);
   if (!focus_.update(mediaId, playStatus, nowMs))
     return MCS_ERROR_NO_ERROR;
+  if (refuseStart) {
+    //during a call: it is paused again, and takes neither the keys nor the others' place
+    PMLOG_INFO(CONST_MODULE_MSM, "%s %s started playing during a call", __FUNCTION__, mediaId.c_str());
+    refused = true;
+    return MCS_ERROR_NO_ERROR;
+  }
 
   //a start: the keys go to it, and the others playing stop
   PMLOG_INFO(CONST_MODULE_MSM, "%s %s started playing", __FUNCTION__, mediaId.c_str());

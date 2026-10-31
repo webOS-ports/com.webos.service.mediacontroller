@@ -75,7 +75,7 @@ TEST_F(Lifecycle, RegistersTheServiceAndItsMethods)
     start();
     EXPECT_EQ(fakebus::registeredName(), "com.webos.service.mediacontroller");
     EXPECT_TRUE(fakebus::cancelFunctionSet());
-    EXPECT_EQ(fakebus::methods().size(), 17u + MCS_COVER_ART
+    EXPECT_EQ(fakebus::methods().size(), 18u + MCS_COVER_ART
 #if USE_TEST_METHOD
               + 1
 #endif

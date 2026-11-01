@@ -1,6 +1,7 @@
 {
     "com.webos.service.mediacontroller": [
         "bluetooth.query",
-        "bluetooth.management"
+        "bluetooth.management",
+        "audio.query"
     ]
 }

@@ -29,6 +29,9 @@ static constexpr const char *cstrBTAvrcpGetStatus = "luna://com.webos.service.bl
 static constexpr const char *cstrBTAvrcpReceivePassThroughCommand = "luna://com.webos.service.bluetooth2/avrcp/receivePassThroughCommand";
 static constexpr const char *cstrSubscribe = "{\"subscribe\":true}";
 static constexpr const char *cstrBTNotifyMediaPlayStatus = "luna://com.webos.service.bluetooth2/avrcp/notifyMediaPlayStatus";
+static constexpr const char *cstrRegisterServerStatus = "luna://com.webos.service.bus/signal/registerServerStatus";
+static constexpr const char *cstrAudiodService = "com.palm.audio";
+static constexpr const char *cstrAudiodGetStatus = "luna://com.palm.audio/getStatus";
 
 static void respond(LSMessage &message, const std::string &payload) {
   CLSError lserror;
@@ -63,6 +66,7 @@ static LSMethod mediaControlMethods[] = {
   MCS_METHOD(setMediaPlayPosition),
   MCS_METHOD(receiveMediaPlaybackInfo),
   MCS_METHOD(injectMediaKeyEvent),
+  MCS_METHOD(registerCallKeys),
   MCS_METHOD(setMediaCoverArt),
   MCS_METHOD(setSupportedActions),
 #if USE_TEST_METHOD
@@ -104,10 +108,21 @@ bool MediaControlService::start(GMainLoop *loop) {
   // follow bluetooth2 coming and going
   pbnjson::JValue payload = pbnjson::Object();
   payload.put("serviceName", "com.webos.service.bluetooth2");
-  if (!LSCall(lsHandle_, "luna://com.webos.service.bus/signal/registerServerStatus",
+  if (!LSCall(lsHandle_, cstrRegisterServerStatus,
               payload.stringify().c_str(), &MediaControlService::onBTServerStatusCb,
               this, &btServerStatusToken_, &lserror)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s registerServerStatus failed: %s", __FUNCTION__, lserror.text());
+    stop();
+    return false;
+  }
+
+  // and audiod: calls, and where the sound goes
+  payload.put("serviceName", cstrAudiodService);
+  if (!LSCall(lsHandle_, cstrRegisterServerStatus,
+              payload.stringify().c_str(), &MediaControlService::onAudiodServerStatusCb,
+              this, &audiodServerStatusToken_, &lserror)) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s registerServerStatus for audiod failed: %s", __FUNCTION__,
+                lserror.text());
     stop();
     return false;
   }
@@ -136,6 +151,9 @@ void MediaControlService::stop() {
   for (auto& client : sessionClients_)
     LSMessageUnref(client.second);
   sessionClients_.clear();
+  for (LSMessage *client : callKeyClients_)
+    LSMessageUnref(client);
+  callKeyClients_.clear();
   // and the sessions with them: none of their clients is held any more
   mediaSessionMgr_.clear();
 
@@ -146,6 +164,9 @@ void MediaControlService::stop() {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s LSUnregister failed: %s", __FUNCTION__, lserror.text());
   lsHandle_ = nullptr;
   btServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+  audiodServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+  audiodStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+  audio_ = MediaFocus::Audio();
   btAdapterToken_ = LSMESSAGE_TOKEN_INVALID;
   btDeviceTokens_.clear();
   avrcpStatusTokens_.clear();
@@ -465,6 +486,12 @@ bool MediaControlService::onBTAvrcpKeyEventsCb(LSHandle *, LSMessage *message, v
     return true;
   if (!obj->mediaControlPrivate_.isDeviceRegistered(address, adapterAddress))
     return true;
+  MediaFocus::Audio audio = obj->audio();
+  if (!MediaFocus::takesBluetoothKey(audio)) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s %s from %s dropped: %s", __FUNCTION__, keyCode.c_str(),
+               address.c_str(), audio.inCall ? "a call is up" : "the sound goes elsewhere");
+    return true;
+  }
 
   //post key event to the session last activated, on bluetooth's display (0)
   std::string mediaId = obj->mediaSessionMgr_.getCurrentActiveSession();
@@ -474,6 +501,77 @@ bool MediaControlService::onBTAvrcpKeyEventsCb(LSHandle *, LSMessage *message, v
     return true;
 
   obj->sendKeyEvent(mediaId, keyCode);
+  return true;
+}
+
+bool MediaControlService::onAudiodServerStatusCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
+    return true;
+
+  if (btBool(payload, "connected")) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s audiod is up", __FUNCTION__);
+    obj->subscribeToAudiodStatus();
+  } else {
+    /* What it said is gone with it: the keys go as they did without it
+     * until it says otherwise. */
+    PMLOG_INFO(CONST_MODULE_MCS, "%s audiod is down", __FUNCTION__);
+    obj->cancelCall(obj->audiodStatusToken_);
+    MediaFocus::Audio before = obj->audio();
+    obj->audio_ = MediaFocus::Audio();
+    obj->callMayHaveEnded(before);
+  }
+  return true;
+}
+
+void MediaControlService::subscribeToAudiodStatus() {
+  if (audiodStatusToken_ != LSMESSAGE_TOKEN_INVALID)
+    return;
+
+  CLSError lserror;
+  if (!LSCall(lsHandle_, cstrAudiodGetStatus, cstrSubscribe,
+              &MediaControlService::onAudiodStatusCb, this, &audiodStatusToken_, &lserror)) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSCall failed for audiod getStatus: %s", __FUNCTION__,
+                lserror.text());
+    audiodStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+  }
+}
+
+bool MediaControlService::onAudiodStatusCb(LSHandle *, LSMessage *message, void *ctx) {
+  MediaControlService *obj = static_cast<MediaControlService *>(ctx);
+  pbnjson::JValue payload = btReply(message);
+  if (!obj || payload.isNull())
+    return true;
+
+  if (!btBool(payload, "returnValue")) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s audiod getStatus failed: %s", __FUNCTION__,
+                btString(payload, "errorText").c_str());
+    if (LSMessageGetResponseToken(message) == obj->audiodStatusToken_) {
+      obj->audiodStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+      MediaFocus::Audio before = obj->audio();
+      obj->audio_ = MediaFocus::Audio();
+      obj->callMayHaveEnded(before);
+    }
+    return true;
+  }
+
+  /* Each field as audiod sends it; one it does not send (an older audiod)
+   * stays unknown and does not hold the keys back. */
+  MediaFocus::Audio audio;
+  audio.inCallKnown = payload["inCall"].isBoolean();
+  audio.inCall = btBool(payload, "inCall");
+  audio.bluetoothAudioKnown = payload["bluetoothAudio"].isBoolean();
+  audio.bluetoothAudio = btBool(payload, "bluetoothAudio");
+  if (audio.inCall != obj->audio_.inCall || audio.bluetoothAudio != obj->audio_.bluetoothAudio ||
+      audio.inCallKnown != obj->audio_.inCallKnown ||
+      audio.bluetoothAudioKnown != obj->audio_.bluetoothAudioKnown)
+    PMLOG_INFO(CONST_MODULE_MCS, "%s inCall %d bluetoothAudio %d", __FUNCTION__,
+               audio.inCallKnown ? audio.inCall : -1,
+               audio.bluetoothAudioKnown ? audio.bluetoothAudio : -1);
+  MediaFocus::Audio before = obj->audio();
+  obj->audio_ = audio;
+  obj->callMayHaveEnded(before);
   return true;
 }
 
@@ -727,6 +825,16 @@ bool MediaControlService::onSubscriptionCancel(LSHandle *, LSMessage *message, v
     }
   }
 #endif
+  for (auto client = obj->callKeyClients_.begin(); client != obj->callKeyClients_.end(); ++client) {
+    if (*client != message)
+      continue;
+    PMLOG_INFO(CONST_MODULE_MCS, "%s the call keys are let go", __FUNCTION__);
+    MediaFocus::Audio before = obj->audio();
+    LSMessageUnref(*client);
+    obj->callKeyClients_.erase(client);
+    obj->callMayHaveEnded(before);
+    return true;
+  }
   for (const auto& client : obj->sessionClients_) {
     if (client.second != message)
       continue;
@@ -755,6 +863,7 @@ bool MediaControlService::sendKeyEvent(const std::string& mediaId, const std::st
   responseObj.put("returnValue", true);
   responseObj.put("subscribed", true);
   PMLOG_INFO(CONST_MODULE_MCS, "%s send subscription response :%s", __FUNCTION__, responseObj.stringify().c_str());
+  mediaSessionMgr_.keySent(mediaId);
   CLSError lserror;
   if (!LSMessageRespond(client->second, responseObj.stringify().c_str(), &lserror)) {
     PMLOG_ERROR(CONST_MODULE_MCS, "%s LSMessageRespond failed: %s", __FUNCTION__, lserror.text());
@@ -1053,10 +1162,21 @@ bool MediaControlService::setMediaPlayStatus(LSMessage& message) {
   std::string playStatus;
   msg.get("playStatus", playStatus);
   std::vector<std::string> toPause;
-  int errorCode = mediaSessionMgr_.setMediaPlayStatus(mediaId, playStatus,
-                                                      g_get_monotonic_time() / 1000, toPause);
+  bool refused = false;
+  std::int64_t now = clock_();
+  int errorCode = mediaSessionMgr_.setMediaPlayStatus(mediaId, playStatus, now,
+                                                      MediaFocus::refusesStart(audio()), toPause, refused);
   if (errorCode != MCS_ERROR_NO_ERROR)
     return replyError(message, errorCode);
+
+  /* Started during a call: paused again, and played if the call ends
+   * within MediaFocus::kPlayAfterCallMs. Only the session is told - the
+   * call's own sound (a carrier call, or a VoIP call's voipcall/webcall
+   * streams) is no media session and is never touched here. */
+  if (refused) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s pausing %s: a call is up", __FUNCTION__, mediaId.c_str());
+    sendKeyEvent(mediaId, "pause");
+  }
 
   //the last one started wins
   for (const auto& other : toPause) {
@@ -1069,6 +1189,16 @@ bool MediaControlService::setMediaPlayStatus(LSMessage& message) {
   pbnjson::JValue event = pbnjson::Object();
   event.put("playStatus", playStatus);
   broadcastPlaybackInfo(mediaId, "playStatus", event);
+
+  /* The pause it was sent for the call, reported after the call ended: its
+   * held play goes now - or waits for the end of the next call, if one has
+   * come. */
+  if (mediaSessionMgr_.playAfterPause(mediaId, playStatus, now)) {
+    if (MediaFocus::refusesStart(audio()))
+      mediaSessionMgr_.deferPlay(mediaId, now);
+    else
+      playAfterCall(mediaId);
+  }
   return replySuccess(message);
 }
 
@@ -1217,14 +1347,105 @@ bool MediaControlService::injectMediaKeyEvent(LSMessage &message) {
   if (keyEvent.empty())
     return replyError(message, MCS_ERROR_INVALID_EVENT);
 
+  /* The wired headset's button is the call's while the Phone app holds
+   * registerCallKeys: a press answers or hangs up, a long press rejects.
+   * Its long press is nobody else's: with no call it does nothing. */
+  if (MediaFocus::isCallKey(keyEvent)) {
+    if (!callKeyClients_.empty()) {
+      if (!sendCallKey(keyEvent))
+        return replyError(message, MCS_ERROR_SUBSCRIPTION_REPLY_FAILED);
+      return replySuccess(message);
+    }
+    if (keyEvent == "hold")
+      return replySuccess(message);
+  }
+
   std::string mediaId = mediaSessionMgr_.getMediaIdFromDisplayId(displayId);
   if (mediaId.empty())
     return replyError(message, MCS_ERROR_NO_ACTIVE_SESSION);
   std::string playStatus;
   mediaSessionMgr_.getMediaPlayStatus(mediaId, playStatus);
-  if (!sendKeyEvent(mediaId, MediaFocus::resolveKey(keyEvent, playStatus)))
+  std::string key = MediaFocus::resolveKey(keyEvent, playStatus);
+  if (!MediaFocus::takesKey(audio(), key)) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s %s for %s refused: a call is up", __FUNCTION__, key.c_str(),
+               mediaId.c_str());
+    /* audiod's play after a call comes before the Phone app lets go of the
+     * call keys: carried out if the call ends soon after. */
+    if (key == "play")
+      mediaSessionMgr_.deferPlay(mediaId, clock_());
+    return replyError(message, MCS_ERROR_IN_CALL);
+  }
+  /* audiod's play after a call that ended before it came: the play it
+   * held back is on its way already. */
+  if (key == "play" && mediaSessionMgr_.playOnItsWay(mediaId, clock_())) {
+    PMLOG_INFO(CONST_MODULE_MCS, "%s play for %s: sent already as the call ended", __FUNCTION__,
+               mediaId.c_str());
+    return replySuccess(message);
+  }
+  if (!sendKeyEvent(mediaId, key))
     return replyError(message, MCS_ERROR_SUBSCRIPTION_REPLY_FAILED);
   return replySuccess(message);
+}
+
+MediaFocus::Audio MediaControlService::audio() const {
+  return MediaFocus::withCall(audio_, !callKeyClients_.empty());
+}
+
+void MediaControlService::callMayHaveEnded(const MediaFocus::Audio& before) {
+  if (!MediaFocus::callEnded(before, audio()))
+    return;
+  std::string mediaId = mediaSessionMgr_.playAfterCall(clock_());
+  if (!mediaId.empty())
+    playAfterCall(mediaId);
+}
+
+void MediaControlService::playAfterCall(const std::string& mediaId) {
+  PMLOG_INFO(CONST_MODULE_MCS, "%s playing %s: it was to play as the call ended", __FUNCTION__,
+             mediaId.c_str());
+  if (sendKeyEvent(mediaId, "play"))
+    mediaSessionMgr_.playSent(mediaId);
+}
+
+std::int64_t MediaControlService::monotonicMs() {
+  return g_get_monotonic_time() / 1000;
+}
+
+bool MediaControlService::registerCallKeys(LSMessage& message) {
+  LSMessageJsonParser msg(&message, STRICT_SCHEMA(PROPS_1(REQUIRED(subscribe, boolean)) REQUIRED_1(subscribe)));
+  if (!msg.parse(__FUNCTION__) || !LSMessageIsSubscription(&message))
+    return replyError(message, MCS_ERROR_PARSING_FAILED);
+
+  CLSError lserror;
+  if (!LSSubscriptionAdd(lsHandle_, "registerCallKeys", &message, &lserror)) {
+    PMLOG_ERROR(CONST_MODULE_MCS, "%s LSSubscriptionAdd failed: %s", __FUNCTION__, lserror.text());
+    return replyError(message, MCS_ERROR_SUBSCRIPTION_FAILED);
+  }
+  LSMessageRef(&message);
+  callKeyClients_.push_back(&message);
+  PMLOG_INFO(CONST_MODULE_MCS, "%s the call keys are held", __FUNCTION__);
+
+  pbnjson::JValue responseObj = pbnjson::Object();
+  responseObj.put("returnValue", true);
+  responseObj.put("subscribed", true);
+  respond(message, responseObj.stringify());
+  return true;
+}
+
+bool MediaControlService::sendCallKey(const std::string& keyEvent) {
+  pbnjson::JValue responseObj = pbnjson::Object();
+  responseObj.put("keyEvent", keyEvent);
+  responseObj.put("returnValue", true);
+  responseObj.put("subscribed", true);
+  PMLOG_INFO(CONST_MODULE_MCS, "%s %s to the call", __FUNCTION__, keyEvent.c_str());
+  bool sent = false;
+  for (LSMessage *client : callKeyClients_) {
+    CLSError lserror;
+    if (LSMessageRespond(client, responseObj.stringify().c_str(), &lserror))
+      sent = true;
+    else
+      PMLOG_ERROR(CONST_MODULE_MCS, "%s LSMessageRespond failed: %s", __FUNCTION__, lserror.text());
+  }
+  return sent;
 }
 
 bool MediaControlService::setMediaCoverArt(LSMessage& message) {

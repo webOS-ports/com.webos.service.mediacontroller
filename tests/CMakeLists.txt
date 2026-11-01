@@ -31,7 +31,8 @@ set(MCS_TEST_SOURCES
     unit/test_focus.cpp
     unit/test_replies.cpp
     unit/test_bluetooth.cpp
-    unit/test_coverart.cpp)
+    unit/test_coverart.cpp
+    unit/test_callkeys.cpp)
 
 add_executable(mcs-tests
     $<TARGET_OBJECTS:mcs-core>

@@ -75,13 +75,36 @@ public:
   //! When it starts mediaId playing (see MediaFocus) the session becomes
   //! the active one, and toPause gets the sessions it stops - unless
   //! refuseStart (a call is up): then refused is set, and the start leaves
-  //! the active session and the others as they were.
+  //! the active session and the others as they were, and the play is held
+  //! back for the call's end (MediaFocus::deferPlay).
   int setMediaPlayStatus(const std::string& mediaId,
                          const std::string& playStatus,
                          std::int64_t nowMs,
                          bool refuseStart,
                          std::vector<std::string>& toPause,
                          bool& refused);
+  //! A key that would have played mediaId was refused for a call at
+  //! nowMs: see MediaFocus::deferPlay.
+  void deferPlay(const std::string& mediaId, std::int64_t nowMs);
+  //! The call has ended at nowMs: the session to play now, or "". Of those
+  //! whose play was held back within MediaFocus::kPlayAfterCallMs and that
+  //! are there still, the first held back - one, as only one would play
+  //! on: the last started wins. The first is the one that played on its
+  //! own; one that played after it may be its echo (spotify-webos-service's
+  //! session, which plays when the Music app tells it to). None if that
+  //! one plays already - or, if it only still says so, its pause for the
+  //! call not reported yet: then its play waits for that (MediaFocus::
+  //! awaitPause), and playAfterPause says when.
+  std::string playAfterCall(std::int64_t nowMs);
+  //! mediaId has reported playStatus at nowMs: whether to play it now, as
+  //! its play was waiting for this.
+  bool playAfterPause(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs);
+  //! See MediaFocus::playSent, keySent and playOnItsWay.
+  void playSent(const std::string& mediaId) { focus_.playSent(mediaId); }
+  void keySent(const std::string& mediaId) { focus_.keySent(mediaId); }
+  bool playOnItsWay(const std::string& mediaId, std::int64_t nowMs) const {
+    return focus_.playOnItsWay(mediaId, nowMs);
+  }
   int setMediaMuteStatus(const std::string& mediaId,
                          const std::string& muteStatus);
   int setMediaPlayPosition(const std::string& mediaId,

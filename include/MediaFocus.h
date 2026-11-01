@@ -19,6 +19,7 @@
 
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -44,6 +45,12 @@ public:
   //! At most this many pauses for one session within kCarryOnMs during a
   //! call (refusesStart): see repause().
   static constexpr unsigned kRepauseLimit = 5;
+  //! A play undone for a call this long before the call ends is carried
+  //! out when it ends: see deferPlay().
+  static constexpr std::int64_t kPlayAfterCallMs = 3000;
+  //! How long after a call's end a session still answering the pause it
+  //! was sent for the call is waited for: see awaitPause().
+  static constexpr std::int64_t kPauseAnswerMs = 1000;
 
   struct Session
   {
@@ -63,6 +70,46 @@ public:
   //! within kCarryOnMs: an app that answers every pause by playing again
   //! is let play, rather than kept in a pause/play loop with it.
   bool repause(const std::string& mediaId, std::int64_t nowMs);
+  //! During a call, mediaId was asked to play at nowMs and was paused for
+  //! the call instead (repause()), or the key that would have played it was
+  //! refused (takesKey()). If the call ends within kPlayAfterCallMs, it is
+  //! played then: playsAfterCall().
+  //!
+  //! An app that hears of the call's end from oFono itself - the Music app
+  //! does - plays again at once, while the Phone app takes up to a second
+  //! more to let go of registerCallKeys, and audiod sends its "play" after
+  //! a call before then too. Both came while the call was still taken as
+  //! up, so they were undone, and nothing played after the call. This is
+  //! Android's delayed focus gain (AUDIOFOCUS_REQUEST_DELAYED) for the end
+  //! of a call only: a play asked for earlier in the call, by the user
+  //! (MK-2), is refused for good, as Android refuses a focus request during
+  //! a call that does not accept a delay.
+  void deferPlay(const std::string& mediaId, std::int64_t nowMs);
+  //! The call has ended at nowMs: the sessions whose play was undone within
+  //! kPlayAfterCallMs before then, the first held back first. Every play
+  //! held back is dropped, whether it is returned or not.
+  std::vector<std::string> playsAfterCall(std::int64_t nowMs);
+  //! Whether mediaId was paused by repause() and has not said so yet. Its
+  //! status then is no word on what it does: the Music app says PAUSED some
+  //! 300 ms after the key (357 ms on 31 October 16:00:46, after the call
+  //! had ended).
+  bool pauseOutstanding(const std::string& mediaId) const;
+  //! The call has ended at nowMs with mediaId's play held back and its
+  //! pause outstanding. It is played once it says it stopped, if it does
+  //! within kPauseAnswerMs: later, a stop is a real one of its own and
+  //! does not become a play. Sent another key meanwhile, it is not played.
+  void awaitPause(const std::string& mediaId, std::int64_t nowMs);
+  //! mediaId has reported playStatus at nowMs: whether it is to be played
+  //! now, its pause having come as awaited. True once for an awaitPause().
+  bool pauseAnswered(const std::string& mediaId, const std::string& playStatus, std::int64_t nowMs);
+  //! "play" was sent to mediaId as the call ended. Until it says a play
+  //! status, or is sent another key, that play is on its way, and another
+  //! (audiod's own, after the same call) is not sent again.
+  void playSent(const std::string& mediaId);
+  //! Another key was sent to mediaId.
+  void keySent(const std::string& mediaId);
+  //! Whether a play is sent or will be, within awaitPause()'s time, at nowMs.
+  bool playOnItsWay(const std::string& mediaId, std::int64_t nowMs) const;
   //! The session has gone.
   void forget(const std::string& mediaId);
   void clear();
@@ -126,6 +173,10 @@ public:
   //! Android, where no media gets focus while a call holds it.
   static bool refusesStart(const Audio& audio);
 
+  //! Whether going from before to after ends the call: the last of
+  //! audiod's call and the Phone app's hold of the call keys has gone.
+  static bool callEnded(const Audio& before, const Audio& after);
+
 private:
   struct State
   {
@@ -133,8 +184,14 @@ private:
     bool stopped = false;        //!< has played and stopped
     std::int64_t stoppedAt = 0;  //!< when, if it has
     std::vector<std::int64_t> repausedAt;  //!< repause()s within kCarryOnMs
+    std::optional<std::int64_t> playDeferredAt;  //!< the last deferPlay()
+    std::uint64_t playDeferredOrder = 0;         //!< ... and its place in line
+    bool playOnItsWay = false;   //!< playSent(), with nothing since
+    bool pauseOutstanding = false;  //!< repause()d, and has not said it stopped
+    std::optional<std::int64_t> pauseAwaitedUntil;  //!< see awaitPause()
   };
   std::map<std::string, State> states_;
+  std::uint64_t deferred_ = 0;  //!< deferPlay()s so far
 };
 
 #endif /*MEDIA_FOCUS_H_*/

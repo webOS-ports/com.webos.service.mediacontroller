@@ -169,6 +169,33 @@ int MediaSessionManager::setMediaAction(const std::string& mediaId,
   return MCS_ERROR_NO_ERROR;
 }
 
+void MediaSessionManager::deferPlay(const std::string& mediaId, std::int64_t nowMs) {
+  if (find(mediaId, __FUNCTION__))
+    focus_.deferPlay(mediaId, nowMs);
+}
+
+std::string MediaSessionManager::playAfterCall(std::int64_t nowMs) {
+  for (const std::string& mediaId : focus_.playsAfterCall(nowMs)) {
+    auto session = mapMediaSessionInfo_.find(mediaId);
+    if (session == mapMediaSessionInfo_.end())
+      continue;
+    if (!MediaFocus::isPlaying(session->second.getPlayStatus()))
+      return mediaId;
+    if (focus_.pauseOutstanding(mediaId)) {
+      PMLOG_INFO(CONST_MODULE_MSM, "%s %s: its pause for the call is outstanding; play held for up to %lld ms",
+                 __FUNCTION__, mediaId.c_str(), static_cast<long long>(MediaFocus::kPauseAnswerMs));
+      focus_.awaitPause(mediaId, nowMs);
+    }
+    return std::string();
+  }
+  return std::string();
+}
+
+bool MediaSessionManager::playAfterPause(const std::string& mediaId, const std::string& playStatus,
+                                         std::int64_t nowMs) {
+  return focus_.pauseAnswered(mediaId, playStatus, nowMs);
+}
+
 int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,
                                             const std::string& playStatus,
                                             std::int64_t nowMs,
@@ -201,6 +228,7 @@ int MediaSessionManager::setMediaPlayStatus(const std::string& mediaId,
       return MCS_ERROR_NO_ERROR;
     }
     PMLOG_INFO(CONST_MODULE_MSM, "%s %s started playing during a call", __FUNCTION__, mediaId.c_str());
+    focus_.deferPlay(mediaId, nowMs);
     refused = true;
     return MCS_ERROR_NO_ERROR;
   }

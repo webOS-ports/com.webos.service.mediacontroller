@@ -38,6 +38,7 @@ inline const std::string CSTR_SUBSCRIPTION_REPLY_FAILED = "LSSubscriptionReply f
 inline const std::string CSTR_EMPTY = "";
 inline const std::string CTSR_INVALID_DISPLAYID = "Invalid displayId";
 inline const std::string CTSR_INVALID_EVENT = "Invalid Event";
+inline const std::string CSTR_IN_CALL = "Not during a call";
 
 #define CONST_MODULE_MCS "MediaControlService"
 #define CONST_MODULE_MCP "MediaControlPrivate"
@@ -63,7 +64,8 @@ enum MCSErrorCode {
   MCS_ERROR_SESSION_INVALID_MUTE_STATUS,
   MCS_ERROR_NO_ERROR,
   MCS_ERROR_INVALID_DISPLAYID,
-  MCS_ERROR_INVALID_EVENT
+  MCS_ERROR_INVALID_EVENT,
+  MCS_ERROR_IN_CALL
 };
 
 class mediaMetaData {
@@ -227,6 +229,8 @@ inline std::string getErrorTextFromErrorCode(int errorCode) {
       return CTSR_INVALID_DISPLAYID;
     case MCS_ERROR_INVALID_EVENT:
       return CTSR_INVALID_EVENT;
+    case MCS_ERROR_IN_CALL:
+      return CSTR_IN_CALL;
     default:
       return CSTR_EMPTY;
   }

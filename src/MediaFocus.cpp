@@ -36,6 +36,15 @@ bool MediaFocus::update(const std::string& mediaId, const std::string& playStatu
   return false;
 }
 
+bool MediaFocus::repause(const std::string& mediaId, std::int64_t nowMs) {
+  std::vector<std::int64_t>& at = states_[mediaId].repausedAt;
+  std::erase_if(at, [nowMs](std::int64_t t) { return nowMs - t >= kCarryOnMs; });
+  if (at.size() >= kRepauseLimit)
+    return false;
+  at.push_back(nowMs);
+  return true;
+}
+
 void MediaFocus::forget(const std::string& mediaId) {
   states_.erase(mediaId);
 }
@@ -53,6 +62,34 @@ std::string MediaFocus::resolveKey(const std::string& keyEvent, const std::strin
   if (keyEvent != "playPause")
     return keyEvent;
   return isPlaying(playStatus) ? "pause" : "play";
+}
+
+bool MediaFocus::takesBluetoothKey(const Audio& audio) {
+  if (audio.inCallKnown && audio.inCall)
+    return false;
+  return !audio.bluetoothAudioKnown || audio.bluetoothAudio;
+}
+
+bool MediaFocus::takesKey(const Audio& audio, const std::string& key) {
+  if (!audio.inCallKnown || !audio.inCall)
+    return true;
+  return key == "pause" || key == "stop";
+}
+
+bool MediaFocus::isCallKey(const std::string& keyEvent) {
+  return keyEvent == "playPause" || keyEvent == "hold";
+}
+
+MediaFocus::Audio MediaFocus::withCall(Audio audio, bool callKeysHeld) {
+  if (callKeysHeld) {
+    audio.inCallKnown = true;
+    audio.inCall = true;
+  }
+  return audio;
+}
+
+bool MediaFocus::refusesStart(const Audio& audio) {
+  return audio.inCallKnown && audio.inCall;
 }
 
 std::vector<std::string> MediaFocus::toPause(const Session& starter, const std::vector<Session>& sessions) {

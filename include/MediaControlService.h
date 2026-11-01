@@ -25,8 +25,10 @@
 #include <pbnjson.hpp>
 
 #include <map>
+#include <vector>
 #include <string>
 
+#include "MediaFocus.h"
 #include "MediaSessionManager.h"
 #include "MediaControlPrivate.h"
 
@@ -76,6 +78,7 @@ public:
   bool setMediaCoverArt (LSMessage &);
   bool receiveMediaPlaybackInfo (LSMessage &);
   bool injectMediaKeyEvent (LSMessage &);
+  bool registerCallKeys(LSMessage &);
 #if USE_TEST_METHOD
   bool testKeyEvent(LSMessage &);
 #endif
@@ -85,6 +88,8 @@ public:
   static bool onBTDeviceGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTAvrcpGetStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
   static bool onBTAvrcpKeyEventsCb(LSHandle *lshandle, LSMessage *message, void *ctx);
+  static bool onAudiodServerStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
+  static bool onAudiodStatusCb(LSHandle *lshandle, LSMessage *message, void *ctx);
 
 private:
   int updateMetaDataResponse(const std::string &mediaId, pbnjson::JObject &metaDataObj);
@@ -92,11 +97,14 @@ private:
   void dropBluetooth();
   void dropBTDevice(const std::string& address, const std::string& adapterAddress);
   void cancelCall(LSMessageToken& token);
+  void subscribeToAudiodStatus();
   void notifyBTPlayStatus(const std::string& mediaId, const std::string& playStatus);
   bool sendKeyEvent(const std::string& mediaId, const std::string& keyEvent);
   void broadcastPlaybackInfo(const std::string& mediaId, const std::string& eventType,
                              pbnjson::JValue payload);
   void releaseSessionClient(const std::string& mediaId);
+  MediaFocus::Audio audio() const;
+  bool sendCallKey(const std::string& keyEvent);
 
   LSHandle *lsHandle_ = nullptr;
   MediaSessionManager mediaSessionMgr_;
@@ -105,6 +113,12 @@ private:
   /* The registerMediaSession call of each session that subscribed, held
    * (LSMessageRef) until the session ends. */
   std::map<std::string, LSMessage *> sessionClients_;
+
+  /* The registerCallKeys call of the Phone app, held (LSMessageRef) while
+   * it is open: from the moment a call rings until the last call ends. The
+   * wired headset's button goes to it then, not to a session, and a call
+   * is taken as up (MediaFocus::withCall). */
+  std::vector<LSMessage *> callKeyClients_;
 
 #if MCS_COVER_ART
   void onCoverArtFetched(const CoverArtFetcher::Result &result);
@@ -116,6 +130,14 @@ private:
 
   /* com.webos.service.bus/signal/registerServerStatus for bluetooth2. */
   LSMessageToken btServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+
+  /* audiod: registerServerStatus for com.palm.audio, and its getStatus
+   * subscription while it is up. What it says decides whether a key goes
+   * to a session: none is started during a call, and a Bluetooth headset's
+   * keys count only while it is the output (MediaFocus::takesBluetoothKey). */
+  LSMessageToken audiodServerStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+  LSMessageToken audiodStatusToken_ = LSMESSAGE_TOKEN_INVALID;
+  MediaFocus::Audio audio_;
 
   /* What is held open on bluetooth2, so that each is opened once and
    * cancelled when what it watches goes: device/getStatus repeats every

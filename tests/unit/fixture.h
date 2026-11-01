@@ -52,6 +52,7 @@ const char* const deviceStatus = "luna://com.webos.service.bluetooth2/device/get
 const char* const avrcpStatus = "luna://com.webos.service.bluetooth2/avrcp/getStatus";
 const char* const passThrough = "luna://com.webos.service.bluetooth2/avrcp/receivePassThroughCommand";
 const char* const notifyPlayStatus = "luna://com.webos.service.bluetooth2/avrcp/notifyMediaPlayStatus";
+const char* const audiodStatus = "luna://com.palm.audio/getStatus";
 }
 
 /**
@@ -125,6 +126,47 @@ protected:
         std::vector<fakebus::OutCall> open = fakebus::openCalls(u);
         EXPECT_EQ(open.size(), 1u) << "calls open to " << u;
         return open.empty() ? LSMESSAGE_TOKEN_INVALID : open.front().token;
+    }
+
+    //! The open registerServerStatus call for service.
+    LSMessageToken serverStatusFor(const char* service)
+    {
+        LSMessageToken found = LSMESSAGE_TOKEN_INVALID;
+        int n = 0;
+        for (const fakebus::OutCall& c : fakebus::openCalls(uri::serverStatus)) {
+            if (json(c.payload)["serviceName"].asString() == service) {
+                found = c.token;
+                ++n;
+            }
+        }
+        EXPECT_EQ(n, 1) << "registerServerStatus calls open for " << service;
+        return found;
+    }
+
+    //! audiod comes up or goes down.
+    void audiodUp(bool up = true)
+    {
+        ASSERT_TRUE(fakebus::deliver(serverStatusFor("com.palm.audio"),
+            std::string("{\"returnValue\":true,\"connected\":") + (up ? "true" : "false") +
+            ",\"serviceName\":\"com.palm.audio\"}"));
+    }
+
+    //! audiod says this, as com.palm.audio/getStatus does; up first if it
+    //! is not yet. inCall and bluetoothAudio are left out when negative.
+    void audiod(int inCall, int bluetoothAudio)
+    {
+        if (fakebus::openCalls(uri::audiodStatus).empty())
+            audiodUp();
+        pbnjson::JValue status = pbnjson::Object();
+        status.put("returnValue", true);
+        status.put("subscribed", true);
+        status.put("volume", 50);
+        status.put("headset", true);
+        if (inCall >= 0)
+            status.put("inCall", inCall != 0);
+        if (bluetoothAudio >= 0)
+            status.put("bluetoothAudio", bluetoothAudio != 0);
+        ASSERT_TRUE(fakebus::deliver(openCall(uri::audiodStatus), status.stringify()));
     }
 
     GMainLoop* m_loop = nullptr;

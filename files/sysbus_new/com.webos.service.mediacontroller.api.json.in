@@ -20,6 +20,7 @@
   ],
   "mediacontroller.management": [
     "com.webos.service.mediacontroller/receiveMediaPlaybackInfo",
+    "com.webos.service.mediacontroller/registerCallKeys",
     "com.webos.service.mediacontroller/injectMediaKeyEvent"@MCS_API_TEST_KEY_EVENT@
   ]
 }
